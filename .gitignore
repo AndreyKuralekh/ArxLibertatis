@@ -5,3 +5,8 @@
 !/.travis.yml
 !/.github
 /build
+/build*/
+# Arx VR: local logs and copyrighted game data never go into git
+/logs/
+/gamedata/
+*.pak
