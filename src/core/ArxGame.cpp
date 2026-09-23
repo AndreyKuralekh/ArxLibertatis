@@ -1118,7 +1118,16 @@ void ArxGame::run() {
  */
 void ArxGame::doFrame() {
 	
-	if(config.video.fpsLimit && !benchmark::isEnabled()) {
+	bool limitFps = config.video.fpsLimit && !benchmark::isEnabled();
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		// xrWaitFrame() paces the frames in VR
+		xr::beginFrame();
+		limitFps = false;
+	}
+	#endif
+	
+	if(limitFps) {
 		
 		PlatformInstant now = platform::getTime();
 		

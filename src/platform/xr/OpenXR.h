@@ -50,6 +50,20 @@ void shutdown();
 //! \return true if an OpenXR session exists
 bool isActive();
 
+/*!
+ * Wait for the next VR frame, begin it and locate the eye views.
+ *
+ * Does nothing if a frame has already been begun and not yet ended.
+ */
+void beginFrame();
+
+/*!
+ * Submit the current VR frame to the compositor.
+ *
+ * Called when the game presents a frame. Begins a frame first if needed.
+ */
+void endFrame();
+
 } // namespace xr
 
 #endif // ARX_HAVE_OPENXR

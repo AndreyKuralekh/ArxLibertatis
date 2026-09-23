@@ -61,6 +61,10 @@
 #include "platform/profiler/Profiler.h"
 #include "window/SDL2X11Util.h"
 
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 // Avoid including SDL_syswm.h without SDL_PROTOTYPES_ONLY on non-Windows systems
 // it includes X11 stuff which pollutes the global namespace.
 struct ARX_SDL_SysWMinfo {
@@ -839,6 +843,9 @@ void SDL2Window::processEvents(bool waitForEvent) {
 
 void SDL2Window::showFrame() {
 	ARX_PROFILE_FUNC();
+	#if ARX_HAVE_OPENXR
+	xr::endFrame();
+	#endif
 	SDL_GL_SwapWindow(m_window);
 }
 
