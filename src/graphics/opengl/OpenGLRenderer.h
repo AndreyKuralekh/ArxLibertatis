@@ -89,6 +89,19 @@ public:
 	bool getSnapshot(Image & image) override;
 	bool getSnapshot(Image & image, size_t width, size_t height) override;
 	
+	/*!
+	 * Render into a framebuffer object instead of the window.
+	 *
+	 * \param framebuffer The framebuffer object to bind or 0 for the window.
+	 * \param size        The size of the framebuffer. Ignored for the window.
+	 */
+	void setRenderTarget(GLuint framebuffer, Vec2i size);
+	
+	GLuint getRenderTarget() const { return m_framebuffer; }
+	
+	//! Size of the current render target (the framebuffer object or the window)
+	Vec2i getRenderTargetSize() const;
+	
 	GLTextureStage * GetTextureStage(size_t textureStage) {
 		return reinterpret_cast<GLTextureStage *>(Renderer::GetTextureStage(textureStage));
 	}
@@ -144,6 +157,9 @@ private:
 	GLenum m_glblendDst;
 	
 	Rect m_scissor;
+	
+	GLuint m_framebuffer;
+	Vec2i m_framebufferSize;
 	
 	int m_MSAALevel;
 	bool m_hasMSAA;

@@ -442,6 +442,12 @@ bool ArxGame::initWindow(RenderWindow * window) {
 	#endif
 	
 	setWindowSize(fullscreen);
+	#if ARX_HAVE_OPENXR
+	if(xr::isRequested()) {
+		// The window size is also the size of the VR UI panel
+		getWindow()->setWindowSize(Vec2i(1920, 1080));
+	}
+	#endif
 	
 	if(!m_MainWindow->initialize()) {
 		m_MainWindow = nullptr;

@@ -56,6 +56,8 @@ OpenGLRenderer::OpenGLRenderer()
 	, m_glalphaFunc(0.f)
 	, m_glblendSrc(GL_ONE)
 	, m_glblendDst(GL_ZERO)
+	, m_framebuffer(0)
+	, m_framebufferSize(0)
 	, m_MSAALevel(0)
 	, m_hasMSAA(false)
 	, m_hasTextureNPOT(false)
@@ -577,7 +579,7 @@ void OpenGLRenderer::SetViewport(const Rect & _viewport) {
 	
 	// TODO maybe it's better to always have the viewport cover the whole window and use glScissor instead?
 	
-	int height = mainApp->getWindow()->getSize().y;
+	int height = getRenderTargetSize().y;
 	
 	glViewport(viewport.left, height - viewport.bottom, viewport.width(), viewport.height());
 	
@@ -596,7 +598,7 @@ void OpenGLRenderer::SetScissor(const Rect & rect) {
 		if(!m_scissor.isValid()) {
 			glEnable(GL_SCISSOR_TEST);
 		}
-		int height = mainApp->getWindow()->getSize().y;
+		int height = getRenderTargetSize().y;
 		glScissor(rect.left, height - rect.bottom, rect.width(), rect.height());
 	} else {
 		if(m_scissor.isValid()) {
@@ -859,9 +861,35 @@ void OpenGLRenderer::drawIndexed(Primitive primitive, const TexturedVertex * ver
 	
 }
 
+Vec2i OpenGLRenderer::getRenderTargetSize() const {
+	return m_framebuffer ? m_framebufferSize : mainApp->getWindow()->getSize();
+}
+
+void OpenGLRenderer::setRenderTarget(GLuint framebuffer, Vec2i size) {
+	
+	if(framebuffer == m_framebuffer && (!framebuffer || size == m_framebufferSize)) {
+		return;
+	}
+	
+	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	m_framebuffer = framebuffer;
+	m_framebufferSize = size;
+	
+	// Viewport and scissor coordinates are flipped using the target height - apply them again
+	Rect oldViewport = viewport;
+	viewport = Rect(-1, -1, -1, -1);
+	SetViewport(oldViewport);
+	if(m_scissor.isValid()) {
+		Rect oldScissor = m_scissor;
+		m_scissor = Rect(-1, -1, -1, -1);
+		SetScissor(oldScissor);
+	}
+	
+}
+
 bool OpenGLRenderer::getSnapshot(Image & image) {
 	
-	Vec2i size = mainApp->getWindow()->getSize();
+	Vec2i size = getRenderTargetSize();
 	
 	image.create(size_t(size.x), size_t(size.y), Image::Format_R8G8B8);
 	

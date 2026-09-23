@@ -37,6 +37,8 @@
 
 #include "core/Application.h"
 #include "core/Config.h"
+#include "graphics/Renderer.h"
+#include "graphics/opengl/OpenGLRenderer.h"
 #include "io/log/Logger.h"
 #include "math/Types.h"
 #include "platform/ProgramOptions.h"
@@ -55,6 +57,7 @@ struct Swapchain {
 	GLuint depth = 0; //!< Shared depth renderbuffer, 0 if the swapchain has no depth
 	uint32_t current = 0; //!< Index of the acquired image
 	bool acquired = false;
+	bool rendered = false; //!< The game rendered into the acquired image
 	
 };
 
@@ -83,6 +86,10 @@ static std::array<XrView, 2> views;
 static bool viewsValid = false;
 
 } // namespace state
+
+static OpenGLRenderer * renderer() {
+	return static_cast<OpenGLRenderer *>(GRenderer);
+}
 
 static void enableVR() {
 	state::requested = true;
@@ -385,9 +392,10 @@ static bool createSwapchains() {
 		}
 	}
 	
-	// The UI panel has the same size as the game window so that the 2D layout does not change
+	// The UI panel has the same size as the game window so that the 2D layout does not change.
+	// It needs depth for 3D content drawn into it (menu, cinematics, the player in the book).
 	Vec2i uiSize = mainApp->getWindow()->getSize();
-	if(!createSwapchain(state::ui, uiSize, false)) {
+	if(!createSwapchain(state::ui, uiSize, true)) {
 		return false;
 	}
 	
@@ -525,42 +533,77 @@ void beginFrame() {
 		acquireImage(state::ui);
 	}
 	
+	// Everything the game draws goes to the UI panel unless a pass selects another target
+	if(state::ui.acquired) {
+		renderer()->setRenderTarget(state::ui.framebuffers[state::ui.current], state::ui.size);
+	}
+	
 }
 
-//! Placeholder content until the game renders into the swapchains: a different color per eye
-static void renderTestPattern() {
+//! Fill the eye images that the game did not render this frame
+static void clearUnusedEyes() {
 	
-	GLint oldFramebuffer = 0;
-	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFramebuffer);
-	GLint oldViewport[4];
-	glGetIntegerv(GL_VIEWPORT, oldViewport);
+	GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
 	GLfloat oldClearColor[4];
 	glGetFloatv(GL_COLOR_CLEAR_VALUE, oldClearColor);
+	GLint oldViewport[4];
+	glGetIntegerv(GL_VIEWPORT, oldViewport);
+	
+	glClearColor(0.02f, 0.02f, 0.02f, 1.f);
+	for(Swapchain & eye : state::eyes) {
+		if(eye.acquired && !eye.rendered) {
+			glBindFramebuffer(GL_FRAMEBUFFER, eye.framebuffers[eye.current]);
+			glViewport(0, 0, eye.size.x, eye.size.y);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		}
+	}
+	
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	glViewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
+	glClearColor(oldClearColor[0], oldClearColor[1], oldClearColor[2], oldClearColor[3]);
+	if(scissor) {
+		glEnable(GL_SCISSOR_TEST);
+	}
+	
+}
+
+//! Copy the VR view selected by config.vr.mirror into the desktop window
+static void mirrorToWindow() {
+	
+	const Swapchain * source = nullptr;
+	if(config.vr.mirror == "ui") {
+		source = &state::ui;
+	} else if(config.vr.mirror == "left") {
+		source = state::eyes[0].rendered ? &state::eyes[0] : &state::ui;
+	}
+	if(!source || !source->acquired) {
+		return;
+	}
+	
 	GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
 	glDisable(GL_SCISSOR_TEST);
 	
-	const float colors[2][3] = { { 0.4f, 0.1f, 0.1f }, { 0.1f, 0.1f, 0.4f } };
-	for(size_t i = 0; i < state::eyes.size(); i++) {
-		const Swapchain & eye = state::eyes[i];
-		if(!eye.acquired) {
-			continue;
-		}
-		glBindFramebuffer(GL_FRAMEBUFFER, eye.framebuffers[eye.current]);
-		glViewport(0, 0, eye.size.x, eye.size.y);
-		glClearColor(colors[i][0], colors[i][1], colors[i][2], 1.f);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	}
+	Vec2i window = mainApp->getWindow()->getSize();
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, source->framebuffers[source->current]);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	
-	if(state::ui.acquired) {
-		glBindFramebuffer(GL_FRAMEBUFFER, state::ui.framebuffers[state::ui.current]);
-		glViewport(0, 0, state::ui.size.x, state::ui.size.y);
-		glClearColor(0.1f, 0.3f, 0.1f, 1.f);
+	// Keep the aspect ratio of the source
+	Vec2i size = window;
+	if(source->size.x * window.y > window.x * source->size.y) {
+		size.y = window.x * source->size.y / source->size.x;
+	} else {
+		size.x = window.y * source->size.x / source->size.y;
+	}
+	Vec2i offset((window.x - size.x) / 2, (window.y - size.y) / 2);
+	if(size != window) {
+		glClearColor(0.f, 0.f, 0.f, 1.f);
 		glClear(GL_COLOR_BUFFER_BIT);
 	}
+	glBlitFramebuffer(0, 0, source->size.x, source->size.y, offset.x, offset.y, offset.x + size.x, offset.y + size.y,
+	                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
 	
-	glBindFramebuffer(GL_FRAMEBUFFER, GLuint(oldFramebuffer));
-	glViewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
-	glClearColor(oldClearColor[0], oldClearColor[1], oldClearColor[2], oldClearColor[3]);
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
 	if(scissor) {
 		glEnable(GL_SCISSOR_TEST);
 	}
@@ -587,14 +630,19 @@ void endFrame() {
 	std::vector<const XrCompositionLayerBaseHeader *> layers;
 	
 	bool eyesReady = state::viewsValid && state::eyes[0].acquired && state::eyes[1].acquired;
+	bool uiReady = state::ui.acquired;
 	if(state::frameState.shouldRender) {
-		renderTestPattern();
+		clearUnusedEyes();
+		mirrorToWindow();
 	}
+	
+	// Leave the swapchain images alone until the next frame begins
+	renderer()->setRenderTarget(0, Vec2i(0));
 	
 	for(Swapchain & eye : state::eyes) {
 		releaseImage(eye);
+		eye.rendered = false;
 	}
-	bool uiReady = state::ui.acquired;
 	releaseImage(state::ui);
 	
 	if(state::frameState.shouldRender && eyesReady) {
@@ -612,7 +660,8 @@ void endFrame() {
 	}
 	
 	if(state::frameState.shouldRender && uiReady) {
-		quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+		// The panel shows the whole game for now, so it is opaque
+		quad.layerFlags = 0;
 		quad.space = state::localSpace;
 		quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 		quad.subImage.swapchain = state::ui.handle;
@@ -632,6 +681,10 @@ void endFrame() {
 	check(xrEndFrame(state::session, &endInfo), "xrEndFrame");
 	
 	state::frameBegun = false;
+	
+	// Begin the next frame right away so that everything drawn until the next showFrame()
+	// (including the loading screen) lands in the next UI image
+	beginFrame();
 }
 
 bool initialize() {
@@ -655,6 +708,13 @@ bool initialize() {
 void shutdown() {
 	
 	if(state::session != XR_NULL_HANDLE) {
+		if(GRenderer) {
+			renderer()->setRenderTarget(0, Vec2i(0));
+		}
+		for(Swapchain & eye : state::eyes) {
+			releaseImage(eye);
+		}
+		releaseImage(state::ui);
 		if(state::sessionRunning) {
 			xrRequestExitSession(state::session);
 			state::sessionRunning = false;
