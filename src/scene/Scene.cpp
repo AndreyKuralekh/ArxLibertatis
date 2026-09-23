@@ -1093,7 +1093,7 @@ static void RenderWater() {
 	RenderWaterBatch();
 	dynamicVertices.done();
 	
-	vPolyWater.clear();
+	// vPolyWater is cleared in ARX_PORTALS_InitDrawnRooms() - keep it for other views of the same frame
 	
 }
 
@@ -1192,7 +1192,7 @@ static void RenderLava() {
 	RenderLavaBatch();
 	dynamicVertices.done();
 	
-	vPolyLava.clear();
+	// vPolyLava is cleared in ARX_PORTALS_InitDrawnRooms() - keep it for other views of the same frame
 }
 
 static void ARX_PORTALS_Frustrum_RenderRoomTCullSoft(RoomHandle roomIndex, const Vec3f & camPos) {
@@ -1585,7 +1585,7 @@ void ARX_SCENE_Update() {
 	UpdateInter();
 }
 
-void ARX_SCENE_Render() {
+void ARX_SCENE_Render(bool stereoPass) {
 	
 	ARX_PROFILE_FUNC();
 	
@@ -1625,9 +1625,10 @@ void ARX_SCENE_Render() {
 		PopAllTriangleListOpaque();
 	}
 	
-	eyeball.render();
-	
-	PolyBoomDraw();
+	if(!stereoPass) {
+		eyeball.render();
+		PolyBoomDraw();
+	}
 	
 	PopAllTriangleListTransparency();
 	

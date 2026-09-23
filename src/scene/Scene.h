@@ -65,7 +65,12 @@ enum RoomPositionMode {
 RoomHandle ARX_PORTALS_GetRoomNumForPosition(const Vec3f & pos, RoomPositionMode mode = RoomPositionDefault);
 
 void ARX_SCENE_Update();
-void ARX_SCENE_Render();
+/*!
+ * \param stereoPass Rendering one of several views of the same frame: skip effects that
+ *                   advance their state or only queue geometry for the render batcher.
+ *                   The caller must then call eyeball.render() and PolyBoomDraw() once.
+ */
+void ARX_SCENE_Render(bool stereoPass = false);
 bool ARX_SCENE_PORTAL_ClipIO(Entity * io, const Vec3f & position);
 void RoomDrawRelease();
 

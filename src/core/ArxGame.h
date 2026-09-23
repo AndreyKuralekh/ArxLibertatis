@@ -44,6 +44,8 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #ifndef ARX_CORE_ARXGAME_H
 #define ARX_CORE_ARXGAME_H
 
+#include "Configure.h"
+
 #include "core/Application.h"
 #include "core/SaveGame.h"
 #include "core/TimeTypes.h"
@@ -95,6 +97,10 @@ private:
 	
 	void updateLevel();
 	void renderLevel();
+	void renderLevelInterface();
+	#if ARX_HAVE_OPENXR
+	void renderLevelStereo();
+	#endif
 	
 	void onWindowGotFocus(const Window & window) override;
 	void onWindowLostFocus(const Window & window) override;

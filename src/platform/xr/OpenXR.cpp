@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -35,8 +36,14 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include "core/Application.h"
 #include "core/Config.h"
+#include "core/Core.h"
+#include "game/Camera.h"
+#include "graphics/Math.h"
 #include "graphics/Renderer.h"
 #include "graphics/opengl/OpenGLRenderer.h"
 #include "io/log/Logger.h"
@@ -84,6 +91,19 @@ static bool frameBegun = false;
 static XrFrameState frameState = { XR_TYPE_FRAME_STATE };
 static std::array<XrView, 2> views;
 static bool viewsValid = false;
+
+// Head pose in the local space when the view was last recentered
+static bool recenterRequested = true;
+static XrVector3f recenterPosition = { 0.f, 0.f, 0.f };
+static float recenterYaw = 0.f;
+
+// Camera and eye matrices for the current frame, see applyHeadPose()
+static Camera camera;
+static std::array<glm::mat4x4, 2> eyeWorldToView;
+static std::array<glm::mat4x4, 2> eyeProjection;
+
+//! The UI panel was cleared to transparent this frame and is drawn over the world
+static bool uiOverlay = false;
 
 } // namespace state
 
@@ -491,6 +511,182 @@ static void releaseImage(Swapchain & swapchain) {
 	}
 }
 
+/*
+ * Coordinate systems
+ *
+ * OpenXR spaces: x right, y up, z backward, meters (right-handed).
+ * Arx view space: x right, y down, z forward, world units. The two are related by a rotation
+ * of 180 degrees around the x axis (flipYZ), so orientations convert as flipYZ * R * flipYZ.
+ * Arx world to view rotation: Rz(-roll) * Rx(pitch) * Ry(yaw), see toRotationMatrix().
+ */
+
+static const glm::mat3 flipYZ(1.f, 0.f, 0.f, 0.f, -1.f, 0.f, 0.f, 0.f, -1.f);
+
+static Vec3f toVec3(const XrVector3f & v) {
+	return Vec3f(v.x, v.y, v.z);
+}
+
+static glm::mat3 toMat3(const XrQuaternionf & q) {
+	return glm::mat3_cast(glm::quat(q.w, q.x, q.y, q.z));
+}
+
+//! Rotation around the up axis of an OpenXR orientation, 0 when looking along -z
+static float getYaw(const glm::mat3 & rotation) {
+	Vec3f forward = rotation * Vec3f(0.f, 0.f, -1.f);
+	return std::atan2(-forward.x, -forward.z);
+}
+
+static glm::mat3 rotationY(float angle) {
+	return glm::mat3(glm::rotate(glm::mat4(1.f), angle, Vec3f(0.f, 1.f, 0.f)));
+}
+
+//! Convert an Arx world to view rotation to camera angles
+static Anglef toCameraAngle(const glm::mat3 & worldToView) {
+	
+	// The view direction in world space is the third row of the world to view rotation
+	Vec3f forward = glm::transpose(worldToView)[2];
+	float pitch = std::asin(glm::clamp(forward.y, -1.f, 1.f));
+	float yaw = std::atan2(-forward.x, forward.z);
+	
+	// What remains after removing pitch and yaw is Rz(-roll)
+	glm::mat3 pitchYaw(toRotationMatrix(Anglef(glm::degrees(pitch), glm::degrees(yaw), 0.f)));
+	glm::mat3 roll = worldToView * glm::transpose(pitchYaw);
+	float rollAngle = -std::atan2(roll[0][1], roll[0][0]);
+	
+	return Anglef(glm::degrees(pitch), glm::degrees(yaw), glm::degrees(rollAngle));
+}
+
+//! Projection for an eye with the same conventions as createProjectionMatrix() in Camera.cpp
+static glm::mat4x4 createEyeProjection(const XrFovf & fov, float nearDist, float farDist) {
+	
+	float left = std::tan(fov.angleLeft);
+	float right = std::tan(fov.angleRight);
+	float up = std::tan(fov.angleUp);
+	float down = std::tan(fov.angleDown);
+	float q = farDist / (farDist - nearDist);
+	
+	// View space y points down, clip space y up
+	glm::mat4x4 projection(0.f);
+	projection[0][0] = 2.f / (right - left);
+	projection[2][0] = -(right + left) / (right - left);
+	projection[1][1] = -2.f / (up - down);
+	projection[2][1] = -(up + down) / (up - down);
+	projection[2][2] = q;
+	projection[3][2] = -q * nearDist;
+	projection[2][3] = 1.f;
+	
+	return projection;
+}
+
+static void recenterNow() {
+	
+	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
+	state::recenterPosition = { head.x, head.y, head.z };
+	state::recenterYaw = getYaw(toMat3(state::views[0].pose.orientation));
+	state::recenterRequested = false;
+	
+	LogInfo << "VR view recentered at height " << head.y << " m";
+}
+
+void recenter() {
+	state::recenterRequested = true;
+}
+
+bool hasEyeViews() {
+	return state::frameBegun && state::frameState.shouldRender && state::viewsValid
+	       && state::eyes[0].acquired && state::eyes[1].acquired;
+}
+
+Camera * applyHeadPose(const Camera & base) {
+	
+	arx_assert(hasEyeViews());
+	
+	// Local space relative to the recentered head, without its yaw
+	glm::mat3 unyaw = rotationY(-state::recenterYaw);
+	Vec3f origin = toVec3(state::recenterPosition);
+	
+	// Body orientation in the game world: the yaw of the base camera
+	glm::mat3 body = glm::transpose(glm::mat3(toRotationMatrix(Anglef(0.f, base.angle.getYaw(), 0.f))));
+	
+	auto toWorldPosition = [&](const XrVector3f & position) {
+		return base.m_pos + body * (flipYZ * (unyaw * (toVec3(position) - origin)) * config.vr.worldScale);
+	};
+	auto toWorldToView = [&](const XrQuaternionf & orientation) {
+		glm::mat3 viewToWorld = body * flipYZ * unyaw * toMat3(orientation) * flipYZ;
+		return glm::transpose(viewToWorld);
+	};
+	
+	float farDist = base.cdepth;
+	float nearDist = std::min(config.vr.nearPlane, farDist * 0.5f);
+	
+	float maxVertical = 0.f;
+	float maxHorizontal = 0.f;
+	for(size_t i = 0; i < EyeCount; i++) {
+		const XrView & view = state::views[i];
+		glm::mat3 worldToView = toWorldToView(view.pose.orientation);
+		Vec3f position = toWorldPosition(view.pose.position);
+		glm::mat4x4 matrix(worldToView);
+		matrix[3] = glm::vec4(-(worldToView * position), 1.f);
+		state::eyeWorldToView[i] = matrix;
+		state::eyeProjection[i] = createEyeProjection(view.fov, nearDist, farDist);
+		maxVertical = std::max({ maxVertical, std::tan(view.fov.angleUp), -std::tan(view.fov.angleDown) });
+		maxHorizontal = std::max({ maxHorizontal, -std::tan(view.fov.angleLeft), std::tan(view.fov.angleRight) });
+	}
+	
+	// The camera used for culling and CPU projection sits between the eyes and must see
+	// everything that either eye sees. Its vertical field of view is config.video.fov,
+	// the horizontal one follows from the aspect ratio of the game window (see createProjectionMatrix()).
+	float aspect = float(g_size.width()) / float(g_size.height());
+	float halfTan = std::max(maxVertical, maxHorizontal / aspect);
+	float fov = std::min(2.f * std::atan(halfTan) + glm::radians(10.f), glm::radians(170.f));
+	
+	state::camera = base;
+	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
+	state::camera.m_pos = toWorldPosition({ head.x, head.y, head.z });
+	state::camera.angle = toCameraAngle(toWorldToView(state::views[0].pose.orientation));
+	state::camera.setFov(fov);
+	
+	return &state::camera;
+}
+
+void bindEye(size_t eye) {
+	
+	arx_assert(eye < EyeCount && hasEyeViews());
+	
+	Swapchain & swapchain = state::eyes[eye];
+	renderer()->setRenderTarget(swapchain.framebuffers[swapchain.current], swapchain.size);
+	swapchain.rendered = true;
+	
+	GRenderer->SetViewport(Rect(swapchain.size.x, swapchain.size.y));
+	GRenderer->SetViewMatrix(state::eyeWorldToView[eye]);
+	GRenderer->SetProjectionMatrix(state::eyeProjection[eye]);
+	
+	// Vertices projected on the CPU for the camera from applyHeadPose() are in viewport pixels
+	glm::mat4x4 reproject = state::eyeProjection[eye] * state::eyeWorldToView[eye]
+	                        * glm::inverse(g_preparedCamera.m_worldToScreen);
+	renderer()->setTexturedVertexTransform(&reproject);
+	
+}
+
+void bindUi(bool clear) {
+	
+	if(!state::ui.acquired) {
+		return;
+	}
+	
+	renderer()->setRenderTarget(state::ui.framebuffers[state::ui.current], state::ui.size);
+	renderer()->setTexturedVertexTransform(nullptr);
+	GRenderer->SetViewport(g_size);
+	GRenderer->SetViewMatrix(g_preparedCamera.m_worldToView);
+	GRenderer->SetProjectionMatrix(g_preparedCamera.m_viewToClip);
+	
+	if(clear) {
+		GRenderer->Clear(Renderer::ColorBuffer | Renderer::DepthBuffer, Color());
+		state::uiOverlay = true;
+	}
+	
+}
+
 void beginFrame() {
 	
 	if(!isActive() || state::frameBegun) {
@@ -526,6 +722,9 @@ void beginFrame() {
 		if(check(xrLocateViews(state::session, &locateInfo, &viewState, uint32_t(state::views.size()), &count,
 		                       state::views.data()), "xrLocateViews")) {
 			state::viewsValid = (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) != 0;
+		}
+		if(state::viewsValid && state::recenterRequested) {
+			recenterNow();
 		}
 		for(Swapchain & eye : state::eyes) {
 			acquireImage(eye);
@@ -660,14 +859,18 @@ void endFrame() {
 	}
 	
 	if(state::frameState.shouldRender && uiReady) {
-		// The panel shows the whole game for now, so it is opaque
-		quad.layerFlags = 0;
+		// Over the world the panel only has the HUD on a transparent background (premultiplied alpha),
+		// otherwise it shows the whole game screen (menu, cinematics) and is opaque
+		quad.layerFlags = state::uiOverlay ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT : 0;
 		quad.space = state::localSpace;
 		quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 		quad.subImage.swapchain = state::ui.handle;
 		quad.subImage.imageRect.extent = { state::ui.size.x, state::ui.size.y };
-		quad.pose.orientation.w = 1.f;
-		quad.pose.position = { 0.f, 0.f, -config.vr.uiDistance };
+		// In front of the recentered head, facing it
+		glm::quat facing = glm::angleAxis(state::recenterYaw, Vec3f(0.f, 1.f, 0.f));
+		Vec3f position = toVec3(state::recenterPosition) + facing * Vec3f(0.f, 0.f, -config.vr.uiDistance);
+		quad.pose.orientation = { facing.x, facing.y, facing.z, facing.w };
+		quad.pose.position = { position.x, position.y, position.z };
 		quad.size.width = config.vr.uiWidth;
 		quad.size.height = config.vr.uiWidth * float(state::ui.size.y) / float(state::ui.size.x);
 		layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader *>(&quad));
@@ -681,6 +884,7 @@ void endFrame() {
 	check(xrEndFrame(state::session, &endInfo), "xrEndFrame");
 	
 	state::frameBegun = false;
+	state::uiOverlay = false;
 	
 	// Begin the next frame right away so that everything drawn until the next showFrame()
 	// (including the loading screen) lands in the next UI image

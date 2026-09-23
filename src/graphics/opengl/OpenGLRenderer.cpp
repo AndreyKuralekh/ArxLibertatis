@@ -78,6 +78,8 @@ OpenGLRenderer::OpenGLRenderer()
 	, m_currentTransform(GL_UnsetTransform)
 	, m_projection(1.f)
 	, m_view(1.f)
+	, m_hasTexturedVertexTransform(false)
+	, m_texturedVertexTransform(1.f)
 { }
 
 OpenGLRenderer::~OpenGLRenderer() {
@@ -503,12 +505,18 @@ void OpenGLRenderer::disableTransform() {
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	
-	// Change coordinate system from [0, width] x [0, height] to [-1, 1] x [-1, 1] and flip the y axis
-	glTranslatef(-1.f, 1.f, 0.f);
-	glScalef(2.f / viewport.width(), -2.f / viewport.height(), 1.f);
-	
-	// Change pixel origins
-	glTranslatef(0.5f, 0.5f, 0.f);
+	if(m_hasTexturedVertexTransform) {
+		glLoadMatrixf(glm::value_ptr(m_texturedVertexTransform));
+	} else {
+		
+		// Change coordinate system from [0, width] x [0, height] to [-1, 1] x [-1, 1] and flip the y axis
+		glTranslatef(-1.f, 1.f, 0.f);
+		glScalef(2.f / viewport.width(), -2.f / viewport.height(), 1.f);
+		
+		// Change pixel origins
+		glTranslatef(0.5f, 0.5f, 0.f);
+		
+	}
 	
 	if(hasVertexFogCoordinate()) {
 		glFogi(GL_FOG_COORDINATE_SOURCE, GL_FOG_COORDINATE);
@@ -857,6 +865,19 @@ void OpenGLRenderer::drawIndexed(Primitive primitive, const TexturedVertex * ver
 		glDrawRangeElements(arxToGlPrimitiveType[primitive], 0, nvertices - 1, nindices, GL_UNSIGNED_SHORT, indices);
 	} else {
 		glDrawElements(arxToGlPrimitiveType[primitive], nindices, GL_UNSIGNED_SHORT, indices);
+	}
+	
+}
+
+void OpenGLRenderer::setTexturedVertexTransform(const glm::mat4x4 * transform) {
+	
+	m_hasTexturedVertexTransform = (transform != nullptr);
+	if(transform) {
+		m_texturedVertexTransform = *transform;
+	}
+	
+	if(m_currentTransform == GL_NoTransform) {
+		m_currentTransform = GL_UnsetTransform;
 	}
 	
 }

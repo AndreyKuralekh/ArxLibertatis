@@ -20,9 +20,13 @@
 #ifndef ARX_PLATFORM_XR_OPENXR_H
 #define ARX_PLATFORM_XR_OPENXR_H
 
+#include <stddef.h>
+
 #include "Configure.h"
 
 #if ARX_HAVE_OPENXR
+
+struct Camera;
 
 /*!
  * OpenXR VR support.
@@ -63,6 +67,35 @@ void beginFrame();
  * Called when the game presents a frame. Begins a frame first if needed.
  */
 void endFrame();
+
+//! \return true if the eye views of the current frame should be rendered
+bool hasEyeViews();
+
+/*!
+ * Apply the tracked head pose to a game camera.
+ *
+ * The camera position is where the head was when the view was last recentered and its
+ * yaw is the body direction. Also computes the eye view and projection matrices.
+ *
+ * \return a camera at the tracked head position with a field of view that covers both eyes.
+ *         The camera stays valid until the next call.
+ */
+Camera * applyHeadPose(const Camera & base);
+
+//! Number of eye views
+constexpr size_t EyeCount = 2;
+
+/*!
+ * Render into an eye image. World geometry uses the eye's view and projection, pre-transformed
+ * vertices projected for the camera from applyHeadPose() are re-projected into the eye.
+ */
+void bindEye(size_t eye);
+
+//! Render into the UI panel again, with the camera from applyHeadPose()
+void bindUi(bool clear);
+
+//! Place the UI panel and the game camera origin at the current head pose
+void recenter();
 
 } // namespace xr
 

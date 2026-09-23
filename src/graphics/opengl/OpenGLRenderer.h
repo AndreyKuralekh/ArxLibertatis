@@ -102,6 +102,18 @@ public:
 	//! Size of the current render target (the framebuffer object or the window)
 	Vec2i getRenderTargetSize() const;
 	
+	/*!
+	 * Transform pre-transformed vertices (TexturedVertex) with a matrix instead of mapping
+	 * them from viewport pixels to normalized device coordinates.
+	 *
+	 * Used to re-project geometry that was projected for one camera on the CPU into another
+	 * view, such as the eyes of a VR headset.
+	 *
+	 * \param transform Matrix from homogeneous viewport pixel coordinates to clip space,
+	 *                  or nullptr to restore the default mapping.
+	 */
+	void setTexturedVertexTransform(const glm::mat4x4 * transform);
+	
 	GLTextureStage * GetTextureStage(size_t textureStage) {
 		return reinterpret_cast<GLTextureStage *>(Renderer::GetTextureStage(textureStage));
 	}
@@ -190,6 +202,8 @@ private:
 	GLTransformMode m_currentTransform;
 	glm::mat4x4 m_projection;
 	glm::mat4x4 m_view;
+	bool m_hasTexturedVertexTransform;
+	glm::mat4x4 m_texturedVertexTransform;
 	
 };
 

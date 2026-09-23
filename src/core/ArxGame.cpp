@@ -97,6 +97,7 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "graphics/data/FTL.h"
 #include "graphics/data/Mesh.h"
 #include "graphics/data/TextureContainer.h"
+#include "graphics/effects/Decal.h"
 #include "graphics/effects/Fade.h"
 #include "graphics/effects/Fog.h"
 #include "graphics/effects/LightFlare.h"
@@ -1521,6 +1522,12 @@ void ArxGame::updateActiveCamera() {
 	
 	ManageQuakeFX(cam);
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::hasEyeViews()) {
+		cam = xr::applyHeadPose(*cam);
+	}
+	#endif
+	
 	PrepareCamera(cam, g_size);
 	
 }
@@ -1821,6 +1828,14 @@ void ArxGame::renderLevel() {
 	
 	ARX_PROFILE_FUNC();
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::hasEyeViews()) {
+		renderLevelStereo();
+		renderLevelInterface();
+		return;
+	}
+	#endif
+	
 	// Clear screen & Z buffers
 	GRenderer->Clear(Renderer::ColorBuffer | Renderer::DepthBuffer, g_fogColor);
 	
@@ -1880,6 +1895,74 @@ void ArxGame::renderLevel() {
 	// Manage Death visual & Launch menu...
 	ARX_PLAYER_Manage_Death();
 
+	renderLevelInterface();
+}
+
+#if ARX_HAVE_OPENXR
+void ArxGame::renderLevelStereo() {
+	
+	// Most geometry is projected on the CPU for the camera from updateActiveCamera(), which sits
+	// between the eyes and covers both. Each eye re-projects it on the GPU, so everything that
+	// updates state or queues geometry for the render batcher runs only once per frame.
+	
+	for(size_t eye = 0; eye < xr::EyeCount; eye++) {
+		xr::bindEye(eye);
+		GRenderer->Clear(Renderer::ColorBuffer | Renderer::DepthBuffer, g_fogColor);
+		GRenderer->SetFogParams(fZFogStart * g_camera->cdepth, fZFogEnd * g_camera->cdepth);
+		GRenderer->SetFogColor(g_fogColor);
+		ARX_SCENE_Render(/* stereoPass = */ true);
+	}
+	
+	// Effects and screen overlays are updated once and drawn into the UI panel or the batcher
+	xr::bindUi(/* clear = */ true);
+	
+	eyeball.render();
+	PolyBoomDraw();
+	
+	g_particleManager.Render();
+	ARX_PARTICLES_Update();
+	ParticleSparkUpdate();
+	
+	if(!((player.Interface & INTER_PLAYERBOOK) && !(player.Interface & INTER_COMBATMODE))) {
+		ARX_MAGICAL_FLARES_Update();
+	}
+	
+	CheckMr();
+	
+	if(player.m_improve) {
+		DrawImproveVisionInterface();
+	}
+	
+	eyeball.drawMagicSightInterface();
+	
+	if(player.m_paralysed) {
+		UseRenderState state(render2D().blendAdditive());
+		EERIEDrawBitmap(Rectf(g_size), 0.0001f, nullptr, Color::rgb(0.28f, 0.28f, 1.f));
+	}
+	
+	ARX_DAMAGE_Show_Hit_Blood();
+	
+	ARX_SPELLS_Update();
+	
+	updateLightFlares();
+	
+	for(size_t eye = 0; eye < xr::EyeCount; eye++) {
+		xr::bindEye(eye);
+		GRenderer->SetFogColor(Color());
+		g_renderBatcher.render();
+		GRenderer->SetFogColor(g_fogColor);
+		renderLightFlares();
+	}
+	
+	xr::bindUi(/* clear = */ false);
+	
+	ARX_PLAYER_Manage_Death();
+	
+}
+#endif
+
+void ArxGame::renderLevelInterface() {
+	
 	// INTERFACE
 	g_renderBatcher.clear();
 	
