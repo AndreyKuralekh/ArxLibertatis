@@ -134,6 +134,17 @@ constexpr const float
 	speechVolume = 10.f,
 	ambianceVolume = 10.f;
 
+#if ARX_HAVE_OPENXR
+constexpr const bool vrEnabled = false;
+constexpr const float
+	vrSnapTurnAngle = 45.f,
+	vrNearPlane = 5.f,
+	vrUiDistance = 1.5f,
+	vrUiWidth = 1.6f,
+	vrWorldScale = 100.f;
+constexpr const std::string_view vrMirror = "left";
+#endif
+
 constexpr const ActionKey actions[NUM_ACTION_KEY] = {
 	ActionKey(Keyboard::Key_Spacebar), // JUMP
 	ActionKey(Keyboard::Key_LeftCtrl, Keyboard::Key_RightCtrl), // MAGICMODE
@@ -194,6 +205,10 @@ constexpr const std::string_view
 	Input = "input",
 	Key = "key",
 	Misc = "misc";
+
+#if ARX_HAVE_OPENXR
+constexpr const std::string_view Vr = "vr";
+#endif
 
 } // namespace Section
 
@@ -329,6 +344,18 @@ constexpr const std::string_view
 	quicksaveSlots = "quicksave_slots",
 	debugLevels = "debug",
 	realtimeOverride = "realtime_override";
+
+#if ARX_HAVE_OPENXR
+// VR options
+constexpr const std::string_view
+	vrEnabled = "enabled",
+	vrSnapTurnAngle = "snap_turn_angle",
+	vrNearPlane = "near_plane",
+	vrUiDistance = "ui_distance",
+	vrUiWidth = "ui_width",
+	vrWorldScale = "world_scale",
+	vrMirror = "mirror";
+#endif
 
 } // namespace Key
 
@@ -554,6 +581,18 @@ bool Config::save() {
 	writer.writeKey(Key::debugLevels, misc.debug);
 	writer.writeKey(Key::realtimeOverride, misc.realtimeOverride);
 	
+	#if ARX_HAVE_OPENXR
+	// vr
+	writer.beginSection(Section::Vr);
+	writer.writeKey(Key::vrEnabled, vr.enabled);
+	writer.writeKey(Key::vrSnapTurnAngle, vr.snapTurnAngle);
+	writer.writeKey(Key::vrNearPlane, vr.nearPlane);
+	writer.writeKey(Key::vrUiDistance, vr.uiDistance);
+	writer.writeKey(Key::vrUiWidth, vr.uiWidth);
+	writer.writeKey(Key::vrWorldScale, vr.worldScale);
+	writer.writeKey(Key::vrMirror, vr.mirror);
+	#endif
+	
 	return writer.flush();
 }
 
@@ -688,6 +727,17 @@ bool Config::init(const fs::path & file) {
 	misc.quicksaveSlots = std::max(reader.getKey(Section::Misc, Key::quicksaveSlots, Default::quicksaveSlots), 1);
 	misc.debug = reader.getKey(Section::Misc, Key::debugLevels, Default::debugLevels);
 	misc.realtimeOverride = reader.getKey(Section::Misc, Key::realtimeOverride, Default::realtimeOverride);
+	
+	#if ARX_HAVE_OPENXR
+	// Get VR settings
+	vr.enabled = reader.getKey(Section::Vr, Key::vrEnabled, Default::vrEnabled);
+	vr.snapTurnAngle = glm::clamp(reader.getKey(Section::Vr, Key::vrSnapTurnAngle, Default::vrSnapTurnAngle), 5.f, 180.f);
+	vr.nearPlane = glm::clamp(reader.getKey(Section::Vr, Key::vrNearPlane, Default::vrNearPlane), 0.5f, 50.f);
+	vr.uiDistance = glm::clamp(reader.getKey(Section::Vr, Key::vrUiDistance, Default::vrUiDistance), 0.3f, 10.f);
+	vr.uiWidth = glm::clamp(reader.getKey(Section::Vr, Key::vrUiWidth, Default::vrUiWidth), 0.2f, 10.f);
+	vr.worldScale = glm::clamp(reader.getKey(Section::Vr, Key::vrWorldScale, Default::vrWorldScale), 10.f, 1000.f);
+	vr.mirror = reader.getKey(Section::Vr, Key::vrMirror, Default::vrMirror);
+	#endif
 	
 	return loaded;
 }

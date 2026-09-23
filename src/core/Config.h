@@ -22,6 +22,8 @@
 
 #include <string>
 
+#include "Configure.h"
+
 #include "audio/AudioTypes.h"
 
 #include "input/InputKey.h"
@@ -242,6 +244,23 @@ public:
 		std::string realtimeOverride;
 		
 	} misc;
+	
+	#if ARX_HAVE_OPENXR
+	// section 'vr'
+	struct {
+		
+		bool enabled;
+		
+		float snapTurnAngle; //!< Degrees per snap turn step
+		float nearPlane; //!< Near clip distance for the eye views in world units
+		float uiDistance; //!< Distance of the UI panel in meters
+		float uiWidth; //!< Width of the UI panel in meters
+		float worldScale; //!< World units per meter
+		
+		std::string mirror; //!< What to show in the desktop window: "left", "ui" or "none"
+		
+	} vr;
+	#endif
 	
 	bool setActionKey(ControlAction actionId, size_t index, InputKeyId key);
 	void setDefaultActionKeys();

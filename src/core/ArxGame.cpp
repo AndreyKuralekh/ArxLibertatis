@@ -178,6 +178,10 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "window/SDL1Window.h"
 #endif
 
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 InfoPanels g_debugInfo = InfoPanelNone;
 
 extern bool START_NEW_QUEST;
@@ -221,6 +225,12 @@ bool ArxGame::initialize() {
 	if(!init) {
 		return false;
 	}
+	
+	#if ARX_HAVE_OPENXR
+	if(xr::isRequested()) {
+		xr::initialize();
+	}
+	#endif
 	
 	init = initGameData();
 	if(!init) {
@@ -422,7 +432,16 @@ bool ArxGame::initWindow(RenderWindow * window) {
 	m_MainWindow->setMaxMSAALevel(config.video.antialiasing ? 8 : 1);
 	m_MainWindow->setVSync(benchmark::isEnabled() ? 0 : config.video.vsync);
 	
-	setWindowSize(config.video.fullscreen);
+	bool fullscreen = config.video.fullscreen;
+	#if ARX_HAVE_OPENXR
+	if(xr::isRequested()) {
+		// The headset paces frames; the window only mirrors the VR view
+		m_MainWindow->setVSync(0);
+		fullscreen = false;
+	}
+	#endif
+	
+	setWindowSize(fullscreen);
 	
 	if(!m_MainWindow->initialize()) {
 		m_MainWindow = nullptr;
@@ -931,6 +950,10 @@ void ArxGame::shutdown() {
 	
 	if(m_gameInitialized)
 		shutdownGame();
+	
+	#if ARX_HAVE_OPENXR
+	xr::shutdown();
+	#endif
 	
 	Application::shutdown();
 	

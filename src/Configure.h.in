@@ -59,6 +59,9 @@
 #cmakedefine01 ARX_HAVE_OPENAL_EFX
 #cmakedefine01 ARX_HAVE_OPENAL_HRTF
 
+// VR backend
+#cmakedefine01 ARX_HAVE_OPENXR
+
 // Input backend
 #cmakedefine01 ARX_HAVE_SDL1
 #cmakedefine01 ARX_HAVE_SDL2

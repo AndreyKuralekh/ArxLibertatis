@@ -74,6 +74,7 @@ option(USE_OPENAL "Build the OpenAL audio backend" ON)
 option(USE_OPENGL "Build the OpenGL renderer backend" ON)
 option(USE_WINHTTP "Use the native WinHTTP API instead of CURL on Windows" ON)
 option(USE_NATIVE_FS "Use the native filesystem backend directly instead of boost" ON)
+option(ARX_VR "Build OpenXR VR support (Windows + OpenGL only)" OFF)
 set(default_USE_X11 OFF)
 if(NOT WIN32 AND NOT MACOS AND NOT HAIKU)
 	set(default_USE_X11 ON)
@@ -449,6 +450,11 @@ if(USE_OPENAL)
 	if(NOT MSVC AND OPENAL_FOUND)
 		check_link_library(OpenAL OPENAL_LIBRARY)
 	endif()
+endif()
+
+# OpenXR
+if(ARX_VR)
+	find_package(OpenXR CONFIG ${OPTIONAL_DEPENDENCY})
 endif()
 
 # SDL
@@ -1194,6 +1200,11 @@ set(PLATFORM_CRASHHANDLER_WINDOWS_SOURCES
 # Profiler sources
 set(PLATFORM_PROFILER_SOURCES src/platform/profiler/Profiler.cpp)
 
+# OpenXR VR sources
+set(PLATFORM_XR_SOURCES
+	src/platform/xr/OpenXR.cpp
+)
+
 set(SCENE_SOURCES
 	src/scene/ChangeLevel.cpp
 	src/scene/GameSound.cpp
@@ -1294,6 +1305,17 @@ else()
 	unset(ARX_HAVE_SDL)
 	unset(ARX_HAVE_SDL1)
 	unset(ARX_HAVE_SDL2)
+endif()
+
+# VR
+if(ARX_VR AND TARGET OpenXR::openxr_loader AND WIN32 AND EPOXY_FOUND)
+	list(APPEND ARX_LIBRARIES OpenXR::openxr_loader)
+	set(ARX_HAVE_OPENXR 1)
+else()
+	if(ARX_VR)
+		message(WARNING "ARX_VR requires the OpenXR loader, Windows and libepoxy - VR support disabled")
+	endif()
+	set(PLATFORM_XR_SOURCES)
 endif()
 
 # Windowing / input
@@ -1413,6 +1435,7 @@ set(ARX_SOURCES
 	${PLATFORM_EXTRA_SOURCES}
 	${PLATFORM_CRASHHANDLER_SOURCES}
 	${PLATFORM_PROFILER_SOURCES}
+	${PLATFORM_XR_SOURCES}
 	${SCENE_SOURCES}
 	${SCRIPT_SOURCES}
 	${UTIL_SOURCES}
@@ -1987,6 +2010,7 @@ print_configuration("Windowing"
 print_configuration("Features"
 	ARX_HAVE_CRASHHANDLER_POSIX   "POSIX crash handler"
 	ARX_HAVE_CRASHHANDLER_WINDOWS "Win32 crash handler"
+	ARX_HAVE_OPENXR               "OpenXR VR"
 	BUILD_PROFILER_INSTRUMENT     "profiler instrumentation"
 )
 print_configuration("Tools"
