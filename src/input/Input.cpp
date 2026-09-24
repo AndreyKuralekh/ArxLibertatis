@@ -512,6 +512,18 @@ void Input::update(float time) {
 			}
 		}
 		
+		#if ARX_HAVE_OPENXR
+		{
+			// VR controller buttons act as mouse buttons: apply their presses and releases
+			static bool vrButtons[Mouse::ButtonCount] = {};
+			bool vr = xr::isActive() && xr::isMouseButtonPressed(buttonId);
+			if(vr != vrButtons[i]) {
+				bMouseButton[i] = vr;
+				vrButtons[i] = vr;
+			}
+		}
+		#endif
+		
 		if(iOldNumClick[i]) {
 			iOldNumClick[i]--;
 		}
@@ -564,8 +576,22 @@ void Input::update(float time) {
 		mouseInWindow = false;
 	}
 	
+	#if ARX_HAVE_OPENXR
+	Vec2s vrPointer;
+	if(xr::isActive() && m_mouseMode == Mouse::Absolute && xr::getPointer(vrPointer)) {
+		// The VR controller points at the UI panel
+		iMouseA = vrPointer;
+		mouseInWindow = true;
+	}
+	#endif
+	
 	int relX, relY;
 	backend->getRelativeMouseCoords(relX, relY, iWheelDir);
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && xr::getMouseWheel() != 0) {
+		iWheelDir = xr::getMouseWheel();
+	}
+	#endif
 	
 	if(m_mouseMode == Mouse::Relative) {
 		
@@ -764,19 +790,26 @@ void Input::setInvertMouseY(bool invert) {
 bool Input::isKeyPressed(int keyId) const {
 	arx_assert(keyId >= Keyboard::KeyBase && keyId < Keyboard::KeyMax);
 
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && xr::isKeyPressed(keyId)) {
+		// A VR controller button acts as this key
+		return true;
+	}
+	#endif
+	
 	return backend->isKeyboardKeyPressed(keyId);
 }
 
 bool Input::isKeyPressedNowPressed(int keyId) const {
 	arx_assert(keyId >= Keyboard::KeyBase && keyId < Keyboard::KeyMax);
 
-	return backend->isKeyboardKeyPressed(keyId) && (keysStates[keyId] == 1);
+	return isKeyPressed(keyId) && (keysStates[keyId] == 1);
 }
 
 bool Input::isKeyPressedNowUnPressed(int keyId) const {
 	arx_assert(keyId >= Keyboard::KeyBase && keyId < Keyboard::KeyMax);
 
-	return !backend->isKeyboardKeyPressed(keyId) && (keysStates[keyId] == 1);
+	return !isKeyPressed(keyId) && (keysStates[keyId] == 1);
 }
 
 void Input::startTextInput(const Rect & box, TextInputHandler * handler) {
@@ -842,6 +875,12 @@ int Input::getMouseButtonClicked() const {
 
 bool Input::actionNowPressed(ControlAction actionId) const {
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && xr::isActionPressed(actionId) && !xr::wasActionPressed(actionId)) {
+		return true;
+	}
+	#endif
+	
 	for(size_t j = 0; j < std::size(config.actions[actionId].key); j++) {
 		
 		InputKeyId key = config.actions[actionId].key[j];
@@ -883,6 +922,12 @@ static unsigned int uiOneHandedMagicMode = 0;
 static unsigned int uiOneHandedStealth = 0;
 
 bool Input::actionPressed(ControlAction actionId) const {
+	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && xr::isActionPressed(actionId)) {
+		return true;
+	}
+	#endif
 	
 	if(actionId == CONTROLS_CUST_USE || actionId == CONTROLS_CUST_ACTION) {
 		return false;
@@ -982,6 +1027,12 @@ bool Input::actionPressed(ControlAction actionId) const {
 }
 
 bool Input::actionNowReleased(ControlAction actionId) const {
+	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && !xr::isActionPressed(actionId) && xr::wasActionPressed(actionId)) {
+		return true;
+	}
+	#endif
 	
 	for(size_t j = 0; j < std::size(config.actions[actionId].key); j++) {
 		

@@ -46,9 +46,12 @@
 #include "graphics/Math.h"
 #include "graphics/Renderer.h"
 #include "graphics/opengl/OpenGLRenderer.h"
+#include "input/Keyboard.h"
+#include "input/Mouse.h"
 #include "io/log/Logger.h"
 #include "math/Types.h"
 #include "platform/ProgramOptions.h"
+#include "platform/xr/XrInput.h"
 #include "window/RenderWindow.h"
 
 
@@ -111,6 +114,15 @@ static bool uiOverlay = false;
 static bool bodyYawValid = false;
 static float bodyYaw = 0.f;
 static float playerYaw = 0.f; //!< Body + head yaw as last given to the player
+static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (degrees)
+
+// Controller input mapped to the game
+static input::Controls controls;
+static bool pointerValid = false;
+static Vec2s pointer(0);
+static int wheel = 0;
+static std::array<bool, NUM_ACTION_KEY> actions;
+static std::array<bool, NUM_ACTION_KEY> previousActions;
 
 } // namespace state
 
@@ -642,6 +654,8 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 			state::bodyYaw = MAKEANGLE(yaw - headYaw);
 			state::bodyYawValid = true;
 		}
+		state::bodyYaw = MAKEANGLE(state::bodyYaw + state::pendingTurn);
+		state::pendingTurn = 0.f;
 		yaw = state::bodyYaw;
 		state::playerYaw = MAKEANGLE(state::bodyYaw + headYaw);
 	} else {
@@ -743,6 +757,118 @@ void bindUi(bool clear) {
 	
 }
 
+//! Pose and size of the UI panel in the local space
+static void getPanel(glm::quat & orientation, Vec3f & center, Vec2f & size) {
+	orientation = glm::angleAxis(state::recenterYaw, Vec3f(0.f, 1.f, 0.f));
+	center = toVec3(state::recenterPosition) + orientation * Vec3f(0.f, 0.f, -config.vr.uiDistance);
+	Vec2i pixels = getUiSize();
+	size = Vec2f(config.vr.uiWidth, config.vr.uiWidth * float(pixels.y) / float(pixels.x));
+}
+
+//! Where the pointing ray of the controller hits the UI panel, in panel pixels
+static bool intersectPanel(const XrPosef & aim, Vec2s & result) {
+	
+	glm::quat orientation;
+	Vec3f center;
+	Vec2f size;
+	getPanel(orientation, center, size);
+	
+	Vec3f normal = orientation * Vec3f(0.f, 0.f, 1.f);
+	Vec3f origin = toVec3(aim.position);
+	Vec3f direction = toMat3(aim.orientation) * Vec3f(0.f, 0.f, -1.f);
+	
+	float facing = glm::dot(direction, normal);
+	if(facing > -0.01f) {
+		return false; // Parallel to the panel or pointing away from its front
+	}
+	float distance = glm::dot(center - origin, normal) / facing;
+	if(distance <= 0.f) {
+		return false;
+	}
+	
+	Vec3f hit = glm::inverse(orientation) * (origin + direction * distance - center);
+	Vec2f uv(hit.x / size.x + 0.5f, 0.5f - hit.y / size.y);
+	if(uv.x < 0.f || uv.x >= 1.f || uv.y < 0.f || uv.y >= 1.f) {
+		return false;
+	}
+	
+	Vec2i pixels = getUiSize();
+	result = Vec2s(s16(uv.x * float(pixels.x)), s16(uv.y * float(pixels.y)));
+	return true;
+}
+
+//! Map the controller state of this frame to mouse, key and action state for the game
+static void updateControls() {
+	
+	const input::Controls previous = state::controls;
+	state::controls = input::getControls();
+	const input::Controls & controls = state::controls;
+	
+	state::pointerValid = controls.aimValid && intersectPanel(controls.aim, state::pointer);
+	
+	// Thumbstick flicks: snap turns and mouse wheel steps
+	const float flick = 0.7f;
+	if(controls.turn.x > flick && previous.turn.x <= flick) {
+		state::pendingTurn -= config.vr.snapTurnAngle;
+	} else if(controls.turn.x < -flick && previous.turn.x >= -flick) {
+		state::pendingTurn += config.vr.snapTurnAngle;
+	}
+	state::wheel = 0;
+	if(controls.turn.y > flick && previous.turn.y <= flick) {
+		state::wheel = 1;
+	} else if(controls.turn.y < -flick && previous.turn.y >= -flick) {
+		state::wheel = -1;
+	}
+	
+	if(controls.recenter && !previous.recenter) {
+		recenter();
+	}
+	
+	const float deadzone = 0.5f;
+	state::previousActions = state::actions;
+	state::actions.fill(false);
+	state::actions[CONTROLS_CUST_WALKFORWARD] = controls.move.y > deadzone;
+	state::actions[CONTROLS_CUST_WALKBACKWARD] = controls.move.y < -deadzone;
+	state::actions[CONTROLS_CUST_STRAFELEFT] = controls.move.x < -deadzone;
+	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > deadzone;
+	state::actions[CONTROLS_CUST_JUMP] = controls.jump;
+	state::actions[CONTROLS_CUST_CROUCHTOGGLE] = controls.crouch;
+	state::actions[CONTROLS_CUST_INVENTORY] = controls.inventory;
+	state::actions[CONTROLS_CUST_BOOK] = controls.book;
+	state::actions[CONTROLS_CUST_MAGICMODE] = controls.magic;
+	state::actions[CONTROLS_CUST_WEAPON] = controls.weapon;
+	
+}
+
+bool getPointer(Vec2s & position) {
+	position = state::pointer;
+	return state::pointerValid;
+}
+
+bool isMouseButtonPressed(int button) {
+	switch(button) {
+		case Mouse::Button_0: return state::controls.select;
+		case Mouse::Button_1: return state::controls.use;
+		default: return false;
+	}
+}
+
+int getMouseWheel() {
+	return state::wheel;
+}
+
+bool isKeyPressed(int key) {
+	return key == Keyboard::Key_Escape && state::controls.menu;
+}
+
+bool isActionPressed(int action) {
+	return action >= 0 && action < NUM_ACTION_KEY && state::actions[size_t(action)];
+}
+
+bool wasActionPressed(int action) {
+	return action >= 0 && action < NUM_ACTION_KEY && state::previousActions[size_t(action)];
+}
+
 void beginFrame() {
 	
 	if(!isActive() || state::frameBegun) {
@@ -782,6 +908,12 @@ void beginFrame() {
 		if(state::viewsValid && state::recenterRequested) {
 			recenterNow();
 		}
+		if(state::sessionState == XR_SESSION_STATE_FOCUSED) {
+			input::sync(state::session, state::localSpace, state::frameState.predictedDisplayTime);
+		} else {
+			input::sync(XR_NULL_HANDLE, XR_NULL_HANDLE, 0);
+		}
+		updateControls();
 		for(Swapchain & eye : state::eyes) {
 			acquireImage(eye);
 		}
@@ -959,6 +1091,10 @@ bool initialize() {
 		return false;
 	}
 	
+	if(!input::create(state::instance, state::session)) {
+		LogWarning << "VR controllers are not available";
+	}
+	
 	// Wait for the session to become ready
 	pollEvents();
 	
@@ -987,6 +1123,7 @@ void shutdown() {
 			xrDestroySpace(state::localSpace);
 			state::localSpace = XR_NULL_HANDLE;
 		}
+		input::destroy();
 		xrDestroySession(state::session);
 		state::session = XR_NULL_HANDLE;
 	}

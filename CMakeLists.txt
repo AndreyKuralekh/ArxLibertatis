@@ -1203,6 +1203,7 @@ set(PLATFORM_PROFILER_SOURCES src/platform/profiler/Profiler.cpp)
 # OpenXR VR sources
 set(PLATFORM_XR_SOURCES
 	src/platform/xr/OpenXR.cpp
+	src/platform/xr/XrInput.cpp
 )
 
 set(SCENE_SOURCES

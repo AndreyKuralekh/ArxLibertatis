@@ -113,6 +113,27 @@ void bindUi(bool clear);
 //! Place the UI panel and the game camera origin at the current head pose
 void recenter();
 
+/*
+ * VR controller input for the game, updated once per frame. The right controller points at the
+ * UI panel like a mouse, the other buttons act as game actions. Mouse button and key ids are
+ * those from input/Mouse.h and input/Keyboard.h, actions are ControlAction values.
+ */
+
+//! \return true if the controller points at the UI panel, with the position in panel pixels
+bool getPointer(Vec2s & position);
+
+bool isMouseButtonPressed(int button);
+
+//! \return 1 for wheel up, -1 for wheel down or 0
+int getMouseWheel();
+
+bool isKeyPressed(int key);
+
+bool isActionPressed(int action);
+
+//! \return the action state of the previous frame
+bool wasActionPressed(int action);
+
 } // namespace xr
 
 #endif // ARX_HAVE_OPENXR
