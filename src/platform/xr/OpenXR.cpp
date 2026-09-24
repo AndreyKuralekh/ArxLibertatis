@@ -46,8 +46,11 @@
 #include "graphics/Math.h"
 #include "graphics/Renderer.h"
 #include "graphics/opengl/OpenGLRenderer.h"
+#include "graphics/image/Image.h"
 #include "input/Keyboard.h"
 #include "input/Mouse.h"
+#include "io/fs/Filesystem.h"
+#include "io/fs/SystemPaths.h"
 #include "io/log/Logger.h"
 #include "math/Types.h"
 #include "platform/ProgramOptions.h"
@@ -144,7 +147,7 @@ ARX_PROGRAM_OPTION("vr-debug", "", "Start in VR mode with verbose OpenXR logging
 static void dumpVRFrames(u32 count) {
 	state::dumpFrames = count;
 }
-ARX_PROGRAM_OPTION_ARG("vr-dump-frames", "", "Save the first N VR frames as PNG images", &dumpVRFrames, "N")
+ARX_PROGRAM_OPTION_ARG("vr-dump-frames", "", "Save N VR frames, one per second, as BMP images in the user directory", &dumpVRFrames, "N")
 
 static const char * resultToString(XrResult result) {
 	static char buffer[XR_MAX_RESULT_STRING_SIZE];
@@ -997,6 +1000,41 @@ static void mirrorToWindow() {
 	
 }
 
+//! Save the eye and UI images of every 90th frame (about one per second) for --vr-dump-frames
+static void dumpFrame() {
+	
+	static unsigned frame = 0;
+	static unsigned saved = 0;
+	if(saved >= state::dumpFrames || ++frame % 90 != 0) {
+		return;
+	}
+	
+	fs::path dir = fs::getUserDir() / "vr-frames";
+	fs::create_directories(dir);
+	
+	auto save = [&](const Swapchain & swapchain, std::string_view name) {
+		if(!swapchain.acquired) {
+			return;
+		}
+		Image image;
+		image.create(size_t(swapchain.size.x), size_t(swapchain.size.y), Image::Format_R8G8B8);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, swapchain.framebuffers[swapchain.current]);
+		glReadPixels(0, 0, swapchain.size.x, swapchain.size.y, GL_RGB, GL_UNSIGNED_BYTE, image.getData());
+		image.flipY();
+		image.save(dir / (std::to_string(saved) + '-' + std::string(name) + ".bmp"));
+	};
+	if(state::eyes[0].rendered) {
+		save(state::eyes[0], "left");
+		save(state::eyes[1], "right");
+	}
+	save(state::ui, "ui");
+	
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	
+	LogInfo << "Saved VR frame " << saved << " to " << dir;
+	saved++;
+}
+
 void endFrame() {
 	
 	if(!isActive()) {
@@ -1021,6 +1059,7 @@ void endFrame() {
 	if(state::frameState.shouldRender) {
 		clearUnusedEyes();
 		mirrorToWindow();
+		dumpFrame();
 	}
 	
 	// Leave the swapchain images alone until the next frame begins
