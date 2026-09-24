@@ -1528,6 +1528,8 @@ void ArxGame::updateActiveCamera() {
 		Camera base = *cam;
 		if(playerView) {
 			base.m_pos = g_playerCameraStablePos;
+			// Turns by the mouse and keys this frame are only in desiredangle so far
+			base.angle.setYaw(player.desiredangle.getYaw());
 		}
 		cam = xr::applyHeadPose(base, playerView);
 		if(playerView) {

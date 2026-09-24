@@ -455,6 +455,11 @@ static void pollEvents() {
 			
 			case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
 				const auto & changed = reinterpret_cast<const XrEventDataSessionStateChanged &>(event);
+				if(changed.state == XR_SESSION_STATE_VISIBLE && state::sessionState == XR_SESSION_STATE_SYNCHRONIZED) {
+					// The headset display turned on (the headset was put on): the head pose from
+					// before, e.g. with the headset lying on a desk, is not a useful center
+					state::recenterRequested = true;
+				}
 				state::sessionState = changed.state;
 				LogInfo << "OpenXR session state: " << sessionStateName(changed.state);
 				if(changed.state == XR_SESSION_STATE_READY) {
