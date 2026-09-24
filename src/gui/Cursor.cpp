@@ -55,6 +55,12 @@
 
 #include "util/Cast.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 
 enum ARX_INTERFACE_CURSOR_MODE
 {
@@ -507,6 +513,16 @@ void ARX_INTERFACE_RenderCursor(bool flag) {
 			UseRenderState additeState(render2D().blendAdditive());
 			
 			Vec2f pos = Vec2f(g_size.center());
+			#if ARX_HAVE_OPENXR
+			if(xr::isActive()) {
+				// In VR the crosshair is where the view direction crosses the UI panel, which does not move with the head
+				Vec2s gaze;
+				if(!xr::getGazePoint(gaze)) {
+					return;
+				}
+				pos = Vec2f(gaze);
+			}
+			#endif
 			Vec2f size = Vec2f(surf->m_size) * cursorScale;
 			EERIEDrawBitmap(Rectf(pos - size * 0.5f, size.x, size.y), 0.f, surf, Color::gray(alpha));
 			

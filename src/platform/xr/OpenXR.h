@@ -122,6 +122,9 @@ void recenter();
 //! \return true if the controller points at the UI panel, with the position in panel pixels
 bool getPointer(Vec2s & position);
 
+//! \return true if the view direction of the head crosses the UI panel, with the position in panel pixels
+bool getGazePoint(Vec2s & position);
+
 bool isMouseButtonPressed(int button);
 
 //! \return 1 for wheel up, -1 for wheel down or 0

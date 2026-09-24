@@ -848,6 +848,19 @@ bool getPointer(Vec2s & position) {
 	return state::pointerValid;
 }
 
+bool getGazePoint(Vec2s & position) {
+	
+	if(!state::viewsValid) {
+		return false;
+	}
+	
+	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
+	XrPosef gaze = state::views[0].pose;
+	gaze.position = { head.x, head.y, head.z };
+	
+	return intersectPanel(gaze, position);
+}
+
 bool isMouseButtonPressed(int button) {
 	switch(button) {
 		case Mouse::Button_0: return state::controls.select;
