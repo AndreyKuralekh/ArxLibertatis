@@ -42,6 +42,12 @@
 
 #include "window/RenderWindow.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 enum CinematicState {
 	Cinematic_Stopped,
 	Cinematic_StartRequested,
@@ -56,7 +62,13 @@ static std::string LAST_LAUNCHED_CINE;
 Cinematic * ControlCinematique = nullptr; // 2D Cinematic Controller
 
 void cinematicInit() {
-	const Vec2i & size = mainApp->getWindow()->getSize();
+	Vec2i size = mainApp->getWindow()->getSize();
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		// Cinematics are shown on the VR UI panel
+		size = xr::getUiSize();
+	}
+	#endif
 	ControlCinematique = new Cinematic(size);
 }
 

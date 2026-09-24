@@ -445,8 +445,9 @@ bool ArxGame::initWindow(RenderWindow * window) {
 	setWindowSize(fullscreen);
 	#if ARX_HAVE_OPENXR
 	if(xr::isRequested()) {
-		// The window size is also the size of the VR UI panel
-		getWindow()->setWindowSize(Vec2i(1920, 1080));
+		// The window only mirrors the VR view. Keep it small enough to fit on any desktop
+		// so that the mouse can reach all of it.
+		getWindow()->setWindowSize(Vec2i(960, 540));
 	}
 	#endif
 	
@@ -1520,13 +1521,24 @@ void ArxGame::updateActiveCamera() {
 		cam = &g_playerCamera;
 	}
 	
-	ManageQuakeFX(cam);
-	
 	#if ARX_HAVE_OPENXR
 	if(xr::hasEyeViews()) {
-		cam = xr::applyHeadPose(*cam);
-	}
+		// No screen shake or view bobbing in VR: moving the view without head motion is uncomfortable
+		bool playerView = (cam == &g_playerCamera && !EXTERNALVIEW);
+		Camera base = *cam;
+		if(playerView) {
+			base.m_pos = g_playerCameraStablePos;
+		}
+		cam = xr::applyHeadPose(base, playerView);
+		if(playerView) {
+			// The body faces where the head looks so that movement follows the view
+			player.desiredangle = player.angle = Anglef(0.f, xr::getPlayerYaw(), 0.f);
+		}
+	} else
 	#endif
+	{
+		ManageQuakeFX(cam);
+	}
 	
 	PrepareCamera(cam, g_size);
 	

@@ -165,6 +165,10 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
 #include "window/RenderWindow.h"
 
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 class TextManager;
 
 Image savegame_thumbnail;
@@ -221,7 +225,14 @@ float PULSATE;
 bool AdjustUI() {
 	
 	// Sets Danae Screen size depending on windowed/full-screen state
-	g_size = Rect(mainApp->getWindow()->getSize().x, mainApp->getWindow()->getSize().y);
+	Vec2i size = mainApp->getWindow()->getSize();
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		// The interface is drawn into the VR UI panel, not the window
+		size = xr::getUiSize();
+	}
+	#endif
+	g_size = Rect(size.x, size.y);
 		
 	// Computes X & Y screen ratios compared to a standard 640x480 screen
 	

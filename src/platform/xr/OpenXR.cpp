@@ -107,6 +107,11 @@ static std::array<glm::mat4x4, 2> eyeProjection;
 //! The UI panel was cleared to transparent this frame and is drawn over the world
 static bool uiOverlay = false;
 
+// Direction of the player's body in the game world (degrees) - the head turns relative to it
+static bool bodyYawValid = false;
+static float bodyYaw = 0.f;
+static float playerYaw = 0.f; //!< Body + head yaw as last given to the player
+
 } // namespace state
 
 static OpenGLRenderer * renderer() {
@@ -151,6 +156,11 @@ bool isRequested() {
 
 bool isDebug() {
 	return state::debug;
+}
+
+Vec2i getUiSize() {
+	// Independent of the window, which the desktop may resize or maximize
+	return Vec2i(1280, 720);
 }
 
 bool isActive() {
@@ -414,10 +424,8 @@ static bool createSwapchains() {
 		}
 	}
 	
-	// The UI panel has the same size as the game window so that the 2D layout does not change.
-	// It needs depth for 3D content drawn into it (menu, cinematics, the player in the book).
-	Vec2i uiSize = mainApp->getWindow()->getSize();
-	if(!createSwapchain(state::ui, uiSize, true)) {
+	// The UI panel needs depth for 3D content drawn into it (menu, cinematics, the player in the book)
+	if(!createSwapchain(state::ui, getUiSize(), true)) {
 		return false;
 	}
 	
@@ -582,6 +590,11 @@ static glm::mat4x4 createEyeProjection(const XrFovf & fov, float nearDist, float
 
 static void recenterNow() {
 	
+	// Keep the view direction: what was the head yaw relative to the body becomes body yaw
+	float headYaw = getYaw(rotationY(-state::recenterYaw) * toMat3(state::views[0].pose.orientation));
+	state::bodyYaw = MAKEANGLE(state::bodyYaw + glm::degrees(headYaw));
+	state::playerYaw = state::bodyYaw;
+	
 	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
 	state::recenterPosition = { head.x, head.y, head.z };
 	state::recenterYaw = getYaw(toMat3(state::views[0].pose.orientation));
@@ -594,12 +607,16 @@ void recenter() {
 	state::recenterRequested = true;
 }
 
+float getPlayerYaw() {
+	return state::playerYaw;
+}
+
 bool hasEyeViews() {
 	return state::frameBegun && state::frameState.shouldRender && state::viewsValid
 	       && state::eyes[0].acquired && state::eyes[1].acquired;
 }
 
-Camera * applyHeadPose(const Camera & base) {
+Camera * applyHeadPose(const Camera & base, bool playerView) {
 	
 	arx_assert(hasEyeViews());
 	
@@ -607,8 +624,28 @@ Camera * applyHeadPose(const Camera & base) {
 	glm::mat3 unyaw = rotationY(-state::recenterYaw);
 	Vec3f origin = toVec3(state::recenterPosition);
 	
-	// Body orientation in the game world: the yaw of the base camera
-	glm::mat3 body = glm::transpose(glm::mat3(toRotationMatrix(Anglef(0.f, base.angle.getYaw(), 0.f))));
+	// Head yaw relative to the body, positive to the left like the game's yaw
+	float headYaw = glm::degrees(getYaw(unyaw * toMat3(state::views[0].pose.orientation)));
+	
+	float yaw = base.angle.getYaw();
+	if(playerView) {
+		if(state::bodyYawValid) {
+			// The game (mouse, keys, scripts) turned the player since the last frame: turn the body
+			float turned = MAKEANGLE(yaw - state::playerYaw + 180.f) - 180.f;
+			state::bodyYaw = MAKEANGLE(state::bodyYaw + turned);
+		} else {
+			state::bodyYaw = MAKEANGLE(yaw - headYaw);
+			state::bodyYawValid = true;
+		}
+		yaw = state::bodyYaw;
+		state::playerYaw = MAKEANGLE(state::bodyYaw + headYaw);
+	} else {
+		// Scripted camera: its yaw is the body direction, pick up the player's direction afterwards
+		state::bodyYawValid = false;
+	}
+	
+	// Body orientation in the game world
+	glm::mat3 body = glm::transpose(glm::mat3(toRotationMatrix(Anglef(0.f, yaw, 0.f))));
 	
 	auto toWorldPosition = [&](const XrVector3f & position) {
 		return base.m_pos + body * (flipYZ * (unyaw * (toVec3(position) - origin)) * config.vr.worldScale);

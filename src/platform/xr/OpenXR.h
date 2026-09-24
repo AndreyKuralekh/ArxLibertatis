@@ -24,6 +24,8 @@
 
 #include "Configure.h"
 
+#include "math/Types.h"
+
 #if ARX_HAVE_OPENXR
 
 struct Camera;
@@ -55,6 +57,13 @@ void shutdown();
 bool isActive();
 
 /*!
+ * Size of the VR UI panel in pixels.
+ *
+ * In VR the 2D interface (menus, HUD, cinematics) is laid out for this size instead of the window size.
+ */
+Vec2i getUiSize();
+
+/*!
  * Wait for the next VR frame, begin it and locate the eye views.
  *
  * Does nothing if a frame has already been begun and not yet ended.
@@ -74,13 +83,20 @@ bool hasEyeViews();
 /*!
  * Apply the tracked head pose to a game camera.
  *
- * The camera position is where the head was when the view was last recentered and its
- * yaw is the body direction. Also computes the eye view and projection matrices.
+ * The base camera position is where the head was when the view was last recentered.
+ * Also computes the eye view and projection matrices.
+ *
+ * \param playerView true for the first-person player camera: the body direction is tracked
+ *                   separately and turns of the player by the game are added to it.
+ *                   Otherwise the yaw of the base camera is the body direction.
  *
  * \return a camera at the tracked head position with a field of view that covers both eyes.
  *         The camera stays valid until the next call.
  */
-Camera * applyHeadPose(const Camera & base);
+Camera * applyHeadPose(const Camera & base, bool playerView);
+
+//! Yaw the player should face: body direction plus head yaw (valid after applyHeadPose() for the player)
+float getPlayerYaw();
 
 //! Number of eye views
 constexpr size_t EyeCount = 2;

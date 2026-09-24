@@ -69,6 +69,12 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
 #include "window/RenderWindow.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 
 Input * GInput = nullptr;
 
@@ -533,9 +539,18 @@ void Input::update(float time) {
 	// Get the new coordinates
 	int absX, absY;
 	mouseInWindow = backend->getAbsoluteMouseCoords(absX, absY);
-	Vec2s newMousePosition(absX, absY);
 	
 	Vec2i wndSize = mainApp->getWindow()->getSize();
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && wndSize.x > 0 && wndSize.y > 0) {
+		// The interface is drawn into the VR UI panel: map window pixels to panel pixels
+		Vec2i uiSize = xr::getUiSize();
+		absX = absX * uiSize.x / wndSize.x;
+		absY = absY * uiSize.y / wndSize.y;
+		wndSize = uiSize;
+	}
+	#endif
+	Vec2s newMousePosition(absX, absY);
 	if(absX >= 0 && absX < wndSize.x && absY >= 0 && absY < wndSize.y) {
 		
 		// Use the absolute mouse position reported by the backend, as is
