@@ -100,6 +100,8 @@ static float recenterYaw = 0.f;
 // Camera and eye matrices for the current frame, see applyHeadPose()
 static Camera camera;
 static std::array<glm::mat4x4, 2> eyeWorldToView;
+//! Transform from the camera's view space to each eye's view space
+static std::array<glm::dmat4, 2> eyeFromCamera;
 static std::array<glm::mat4x4, 2> eyeProjection;
 
 //! The UI panel was cleared to transparent this frame and is drawn over the world
@@ -646,6 +648,18 @@ Camera * applyHeadPose(const Camera & base) {
 	state::camera.angle = toCameraAngle(toWorldToView(state::views[0].pose.orientation));
 	state::camera.setFov(fov);
 	
+	// Relative eye transforms, computed from tracking space offsets instead of world positions:
+	// matrices containing world coordinates of several thousand units lose too much precision
+	// in single precision and the re-projected geometry would jitter.
+	glm::dmat3 cameraRotation = glm::dmat3(glm::mat3(toRotationMatrix(state::camera.angle)));
+	for(size_t i = 0; i < EyeCount; i++) {
+		glm::dmat3 eyeRotation = glm::dmat3(glm::mat3(state::eyeWorldToView[i]));
+		Vec3f offset = body * (flipYZ * (unyaw * (head - toVec3(state::views[i].pose.position))) * config.vr.worldScale);
+		glm::dmat4 matrix = glm::dmat4(eyeRotation * glm::transpose(cameraRotation));
+		matrix[3] = glm::dvec4(eyeRotation * glm::dvec3(offset), 1.0);
+		state::eyeFromCamera[i] = matrix;
+	}
+	
 	return &state::camera;
 }
 
@@ -662,8 +676,8 @@ void bindEye(size_t eye) {
 	GRenderer->SetProjectionMatrix(state::eyeProjection[eye]);
 	
 	// Vertices projected on the CPU for the camera from applyHeadPose() are in viewport pixels
-	glm::mat4x4 reproject = state::eyeProjection[eye] * state::eyeWorldToView[eye]
-	                        * glm::inverse(g_preparedCamera.m_worldToScreen);
+	glm::dmat4 screenToView = glm::inverse(glm::dmat4(g_preparedCamera.m_viewToScreen));
+	glm::mat4x4 reproject(glm::dmat4(state::eyeProjection[eye]) * state::eyeFromCamera[eye] * screenToView);
 	renderer()->setTexturedVertexTransform(&reproject);
 	
 }
