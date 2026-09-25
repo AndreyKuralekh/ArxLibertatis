@@ -526,6 +526,13 @@ void ManageCombatModeAnimations() {
 		}
 	}
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive() && weapontype != WEAPON_BOW) {
+		// In VR melee strikes come from swinging the controllers, see vr::updateCombat()
+		return;
+	}
+	#endif
+	
 	switch(weapontype) {
 		case WEAPON_BARE: { // BARE HANDS PLAYER MANAGEMENT
 			if(layer1.cur_anim == alist[ANIM_BARE_WAIT]) {

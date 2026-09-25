@@ -130,6 +130,16 @@ bool getHandPose(int hand, bool grip, Vec3f & position, glm::mat3 & orientation)
 //! Finger joint positions and radii in world units, if the runtime tracks the fingers
 bool getHandJoints(int hand, Vec3f * positions, float * radii);
 
+/*!
+ * Position of a point attached to the holding pose of a hand in the tracking space, in meters.
+ *
+ * Unlike world positions this does not change when the player moves or turns with the thumbsticks,
+ * so it measures real hand motion (e.g. the speed of a swing).
+ *
+ * \param offset Offset from the holding pose in the game's view conventions, in world units.
+ */
+bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position);
+
 //! Analog trigger and grip values from 0 to 1
 float getHandTrigger(int hand);
 float getHandSqueeze(int hand);

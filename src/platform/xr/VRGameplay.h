@@ -40,8 +40,16 @@ namespace vr {
  */
 void prepareHands();
 
-//! Draw the hands prepared this frame into the current eye view
+//! Draw the hands (and what they hold) prepared this frame into the current eye view
 void renderHands();
+
+/*!
+ * Melee combat by swinging the controllers: the drawn weapon follows the right hand and hits
+ * what it touches while it moves fast enough, bare hands punch.
+ *
+ * Call once per frame after the camera was updated. Replaces the animation driven melee strikes.
+ */
+void updateCombat();
 
 } // namespace vr
 

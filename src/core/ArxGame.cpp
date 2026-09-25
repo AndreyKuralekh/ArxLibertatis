@@ -1757,6 +1757,12 @@ void ArxGame::updateLevel() {
 
 	updateActiveCamera();
 
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		vr::updateCombat();
+	}
+	#endif
+	
 	ARX_GLOBALMODS_Apply();
 	
 	// Set Listener Position

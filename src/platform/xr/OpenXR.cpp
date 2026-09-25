@@ -806,6 +806,21 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii) {
 	return true;
 }
 
+bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position) {
+	
+	if(hand < 0 || hand >= input::HandCount) {
+		return false;
+	}
+	
+	const input::HandState & state = input::getControls().hands[size_t(hand)];
+	if(!state.gripValid) {
+		return false;
+	}
+	
+	position = toVec3(state.grip.position) + toMat3(state.grip.orientation) * (flipYZ * (offset / config.vr.worldScale));
+	return true;
+}
+
 float getHandTrigger(int hand) {
 	return (hand >= 0 && hand < input::HandCount) ? input::getControls().hands[size_t(hand)].trigger : 0.f;
 }

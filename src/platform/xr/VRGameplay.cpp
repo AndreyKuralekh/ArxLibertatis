@@ -24,15 +24,26 @@
 #include <utility>
 #include <vector>
 
+#include <glm/gtx/quaternion.hpp>
+
+#include "animation/AnimationRender.h"
 #include "core/Config.h"
+#include "core/GameTime.h"
+#include "game/Damage.h"
 #include "game/EntityManager.h"
+#include "game/Equipment.h"
+#include "game/Player.h"
 #include "graphics/Draw.h"
 #include "graphics/Renderer.h"
 #include "graphics/Vertex.h"
 #include "graphics/data/Mesh.h"
+#include "graphics/particle/Spark.h"
 #include "io/log/Logger.h"
 #include "platform/xr/OpenXR.h"
+#include "physics/Collisions.h"
+#include "scene/GameSound.h"
 #include "scene/Light.h"
+#include "script/Script.h"
 
 
 namespace vr {
@@ -175,8 +186,238 @@ void addBone(const Vec3f & a, float radiusA, const Vec3f & b, float radiusB,
 	
 }
 
+/*
+ * Weapon held in the right hand
+ */
+
+struct WeaponGrip {
+	
+	EERIE_3DOBJ * obj = nullptr;
+	glm::quat calibration = quat_identity(); //!< Rotates the blade direction of the model onto the hand's forward axis
+	Vec3f attach = Vec3f(0.f); //!< Where the hand holds the model (primary_attach), in model space
+	float length = 0.f; //!< Distance from the grip to the farthest hit point, in model units
+	
+	bool valid = false; //!< The weapon is in the hand this frame
+	Entity * weapon = nullptr;
+	TransformInfo transform;
+	
+};
+
+WeaponGrip g_weaponGrip;
+
+//! Find how to hold a weapon model: the blade goes from primary_attach to the farthest hit_* point
+void calibrateWeapon(EERIE_3DOBJ * obj) {
+	
+	g_weaponGrip.obj = obj;
+	g_weaponGrip.calibration = quat_identity();
+	g_weaponGrip.attach = Vec3f(0.f);
+	g_weaponGrip.length = 0.f;
+	
+	for(const EERIE_ACTIONLIST & action : obj->actionlist) {
+		if(action.name == "primary_attach") {
+			g_weaponGrip.attach = obj->vertexlist[action.idx].v;
+		}
+	}
+	
+	Vec3f tip = g_weaponGrip.attach;
+	for(const EERIE_ACTIONLIST & action : obj->actionlist) {
+		if(action.name.compare(0, 4, "hit_") == 0) {
+			Vec3f p = obj->vertexlist[action.idx].v;
+			if(glm::distance(p, g_weaponGrip.attach) > glm::distance(tip, g_weaponGrip.attach)) {
+				tip = p;
+			}
+		}
+	}
+	
+	g_weaponGrip.length = glm::distance(tip, g_weaponGrip.attach);
+	if(g_weaponGrip.length > 1.f) {
+		// The hand's forward axis (z) points out of the fist along the controller handle.
+		// Then roll the blade around its axis so that the edge cuts downwards, not sideways.
+		glm::quat blade = glm::rotation(glm::normalize(tip - g_weaponGrip.attach), Vec3f(0.f, 0.f, 1.f));
+		g_weaponGrip.calibration = glm::angleAxis(glm::radians(90.f), Vec3f(0.f, 0.f, 1.f)) * blade;
+	}
+	
+}
+
+//! Place the drawn weapon in the right hand for this frame
+void updateWeaponGrip() {
+	
+	g_weaponGrip.valid = false;
+	g_weaponGrip.weapon = nullptr;
+	
+	if(!(player.Interface & INTER_COMBATMODE)) {
+		return;
+	}
+	WeaponType type = ARX_EQUIPMENT_GetPlayerWeaponType();
+	if(type != WEAPON_DAGGER && type != WEAPON_1H && type != WEAPON_2H) {
+		return;
+	}
+	Entity * weapon = entities.get(player.equiped[EQUIP_SLOT_WEAPON]);
+	if(!weapon || !weapon->obj) {
+		return;
+	}
+	
+	Vec3f position;
+	glm::mat3 orientation;
+	if(!xr::getHandPose(xr::RightHand, true, position, orientation)) {
+		return;
+	}
+	
+	if(g_weaponGrip.obj != weapon->obj) {
+		calibrateWeapon(weapon->obj);
+	}
+	
+	// Same placement as for linked objects: the attach point of the weapon is at the hand
+	TransformInfo t(position, glm::quat_cast(orientation) * g_weaponGrip.calibration, weapon->scale);
+	t.pos = t(weapon->obj->vertexlist[weapon->obj->origin].v - g_weaponGrip.attach);
+	
+	g_weaponGrip.transform = t;
+	g_weaponGrip.weapon = weapon;
+	g_weaponGrip.valid = true;
+	
+}
+
+/*
+ * Swings
+ */
+
+struct Swing {
+	bool active = false;
+	bool hit = false;
+	bool previousValid = false;
+	Vec3f previous = Vec3f(0.f);
+};
+
+std::array<Swing, 2> g_swings;
+
+const float SwingStartSpeed = 2.5f; //!< m/s
+const float SwingEndSpeed = 1.2f; //!< m/s
+
+//! Speed of a point attached to a hand in m/s, from real hand motion only
+float measureSpeed(Swing & swing, int hand, const Vec3f & offset, float seconds) {
+	
+	Vec3f position;
+	if(seconds <= 0.f || !xr::getHandPointInTracking(hand, offset, position)) {
+		swing.previousValid = false;
+		return 0.f;
+	}
+	
+	float speed = swing.previousValid ? glm::distance(position, swing.previous) / seconds : 0.f;
+	swing.previous = position;
+	swing.previousValid = true;
+	return speed;
+}
+
+//! Strength of a swing from its speed, like the aim ratio of a charged strike
+float swingStrength(float speed) {
+	return glm::clamp((speed - 1.5f) / 4.5f, 0.1f, 1.f);
+}
+
+void swingWeapon(float seconds) {
+	
+	Swing & swing = g_swings[xr::RightHand];
+	Entity * io = entities.player();
+	Entity * weapon = g_weaponGrip.weapon;
+	
+	// Hit points follow the hand
+	DrawEERIEInter_ModelTransform(weapon->obj, g_weaponGrip.transform);
+	
+	Vec3f tip(0.f, 0.f, g_weaponGrip.length * weapon->scale);
+	float speed = measureSpeed(swing, xr::RightHand, tip, seconds);
+	
+	if(!swing.active && speed > SwingStartSpeed) {
+		swing.active = true;
+		swing.hit = false;
+		ARX_PLAYER_Remove_Invisibility();
+		WeaponType type = ARX_EQUIPMENT_GetPlayerWeaponType();
+		std::string_view name = (type == WEAPON_DAGGER) ? "dagger" : (type == WEAPON_2H) ? "2h" : "1h";
+		SendIOScriptEvent(nullptr, io, SM_STRIKE, name);
+	}
+	
+	if(swing.active) {
+		player.m_strikeAimRatio = swingStrength(speed);
+		if(!swing.hit) {
+			swing.hit = ARX_EQUIPMENT_Strike_Check(io, weapon, player.m_strikeAimRatio, 0);
+		} else {
+			// Only blood and sparks after the first hit of a swing
+			ARX_EQUIPMENT_Strike_Check(io, weapon, player.m_strikeAimRatio, 1);
+		}
+		if(speed < SwingEndSpeed) {
+			swing.active = false;
+		}
+	}
+	
+}
+
+void punch(int hand, float seconds) {
+	
+	Swing & swing = g_swings[size_t(hand)];
+	Entity * io = entities.player();
+	
+	float speed = measureSpeed(swing, hand, Vec3f(0.f), seconds);
+	
+	Vec3f position;
+	glm::mat3 orientation;
+	if(!xr::getHandPose(hand, true, position, orientation)) {
+		swing.active = false;
+		return;
+	}
+	
+	if(!swing.active && speed > SwingStartSpeed) {
+		swing.active = true;
+		swing.hit = false;
+		ARX_PLAYER_Remove_Invisibility();
+		SendIOScriptEvent(nullptr, io, SM_STRIKE, "bare");
+	}
+	
+	if(swing.active && !swing.hit) {
+		Sphere sphere;
+		sphere.origin = position;
+		sphere.radius = 25.f;
+		Entity * target = nullptr;
+		if(CheckAnythingInSphere(sphere, io, 0, &target)) {
+			player.m_strikeAimRatio = swingStrength(speed);
+			float damages = (player.m_miscFull.damages + 1) * player.m_strikeAimRatio;
+			tryToDoDamage(position, damages, 40, *io);
+			ParticleSparkSpawnContinous(position, unsigned(damages), Color3f(0.45f, 0.1f, 0.f).toRGB());
+			if(target) {
+				ARX_SOUND_PlayCollision(target->material, MATERIAL_FLESH, 1.f, 1.f, position, nullptr);
+			}
+			swing.hit = true;
+		}
+	}
+	
+	if(swing.active && speed < SwingEndSpeed) {
+		swing.active = false;
+	}
+	
+}
+
 } // anonymous namespace
 
+void updateCombat() {
+	
+	updateWeaponGrip();
+	
+	WeaponType type = ARX_EQUIPMENT_GetPlayerWeaponType();
+	if(!(player.Interface & INTER_COMBATMODE) || type == WEAPON_BOW || !entities.player()) {
+		for(Swing & swing : g_swings) {
+			swing = Swing();
+		}
+		return;
+	}
+	
+	float seconds = toMsf(g_platformTime.lastFrameDuration()) / 1000.f;
+	
+	if(type == WEAPON_BARE) {
+		punch(xr::LeftHand, seconds);
+		punch(xr::RightHand, seconds);
+	} else if(g_weaponGrip.valid) {
+		g_swings[xr::LeftHand] = Swing();
+		swingWeapon(seconds);
+	}
+	
+}
 void prepareHands() {
 	
 	g_handVertices.clear();
@@ -235,7 +476,7 @@ void prepareHands() {
 
 void renderHands() {
 	
-	if(g_handVertices.empty()) {
+	if(g_handVertices.empty() && !g_weaponGrip.valid) {
 		return;
 	}
 	
@@ -244,7 +485,16 @@ void renderHands() {
 	UseRenderState renderState(state);
 	GRenderer->SetTexture(0, static_cast<Texture *>(nullptr));
 	
-	EERIEDRAWPRIM(Renderer::TriangleList, g_handVertices.data(), g_handVertices.size());
+	if(!g_handVertices.empty()) {
+		EERIEDRAWPRIM(Renderer::TriangleList, g_handVertices.data(), g_handVertices.size());
+	}
+	
+	if(g_weaponGrip.valid) {
+		float invisibility = std::min(0.9f, entities.player()->invisibility);
+		DrawEERIEInter(g_weaponGrip.weapon->obj, g_weaponGrip.transform, g_weaponGrip.weapon, true, invisibility);
+		PopAllTriangleListOpaque();
+		PopAllTriangleListTransparency();
+	}
 	
 }
 
