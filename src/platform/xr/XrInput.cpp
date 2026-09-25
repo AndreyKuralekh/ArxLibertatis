@@ -142,6 +142,7 @@ bool create(XrInstance instance, XrSession session) {
 	XrAction weapon = button("weapon", "Weapon", &Controls::weapon);
 	XrAction menu = button("menu", "Menu", &Controls::menu);
 	XrAction recenter = button("recenter", "Recenter view", &Controls::recenter);
+	XrAction freelook = button("freelook", "Free look / cursor", &Controls::freelook);
 	
 	bool touch = suggestBindings(instance, "/interaction_profiles/oculus/touch_controller", {
 		{ a.aim, "/user/hand/right/input/aim/pose" },
@@ -157,6 +158,7 @@ bool create(XrInstance instance, XrSession session) {
 		{ weapon, "/user/hand/left/input/trigger/value" },
 		{ menu, "/user/hand/left/input/menu/click" },
 		{ recenter, "/user/hand/right/input/thumbstick/click" },
+		{ freelook, "/user/hand/left/input/thumbstick/click" },
 	});
 	
 	bool simple = suggestBindings(instance, "/interaction_profiles/khr/simple_controller", {

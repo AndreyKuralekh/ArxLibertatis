@@ -949,6 +949,8 @@ static void updateControls() {
 	// Take / use / open what the crosshair points at (the right mouse button toggles free look)
 	state::actions[CONTROLS_CUST_USE] = controls.use;
 	state::actions[CONTROLS_CUST_JUMP] = controls.jump;
+	// Switch to the cursor to click HUD icons (e.g. climbing), and back to free look
+	state::actions[CONTROLS_CUST_FREELOOK] = controls.freelook;
 	state::actions[CONTROLS_CUST_CROUCHTOGGLE] = controls.crouch;
 	state::actions[CONTROLS_CUST_INVENTORY] = controls.inventory;
 	state::actions[CONTROLS_CUST_BOOK] = controls.book;

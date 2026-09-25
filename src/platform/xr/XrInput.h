@@ -46,6 +46,7 @@ struct Controls {
 	bool weapon = false;    //!< Left trigger
 	bool menu = false;      //!< Menu button
 	bool recenter = false;  //!< Right thumbstick click
+	bool freelook = false;  //!< Left thumbstick click: toggle between free look and the cursor
 	
 	XrVector2f move = { 0.f, 0.f }; //!< Left thumbstick
 	XrVector2f turn = { 0.f, 0.f }; //!< Right thumbstick
