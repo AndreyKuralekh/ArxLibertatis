@@ -44,6 +44,14 @@ void prepareHands();
 void renderHands();
 
 /*!
+ * Take items with the right hand: grip near an item holds it, releasing the grip drops or throws it,
+ * releasing it next to the head puts it into the inventory.
+ *
+ * Call once per frame after the camera was updated.
+ */
+void updateGrab();
+
+/*!
  * Melee combat by swinging the controllers: the drawn weapon follows the right hand and hits
  * what it touches while it moves fast enough, bare hands punch.
  *

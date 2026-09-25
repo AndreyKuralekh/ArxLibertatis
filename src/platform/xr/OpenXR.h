@@ -140,6 +140,15 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii);
  */
 bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position);
 
+/*!
+ * Grabbing with the right grip.
+ *
+ * The game tells each frame whether something could be grabbed with the right hand. If so when the
+ * grip is pressed, the press is a grab (isGrabbing() until release) and does not act as Use.
+ */
+void setGrabCandidate(bool available);
+bool isGrabbing();
+
 //! Analog trigger and grip values from 0 to 1
 float getHandTrigger(int hand);
 float getHandSqueeze(int hand);

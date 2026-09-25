@@ -32,6 +32,8 @@
 #include "game/Damage.h"
 #include "game/EntityManager.h"
 #include "game/Equipment.h"
+#include "game/Inventory.h"
+#include "game/Item.h"
 #include "game/Player.h"
 #include "graphics/Draw.h"
 #include "graphics/Renderer.h"
@@ -41,6 +43,8 @@
 #include "io/log/Logger.h"
 #include "platform/xr/OpenXR.h"
 #include "physics/Collisions.h"
+#include "physics/Physics.h"
+#include "scene/Interactive.h"
 #include "scene/GameSound.h"
 #include "scene/Light.h"
 #include "script/Script.h"
@@ -393,7 +397,133 @@ void punch(int hand, float seconds) {
 	
 }
 
+/*
+ * Items held in the right hand
+ */
+
+struct Grab {
+	EntityHandle held;
+	Vec3f offset = Vec3f(0.f); //!< Item position relative to the hand
+	bool handValid = false;
+	Vec3f hand = Vec3f(0.f);
+	Vec3f velocity = Vec3f(0.f); //!< Hand velocity in world units per second
+};
+
+Grab g_grab;
+
+const float GrabReach = 35.f; //!< Maximum distance from the hand to an item that can be taken
+const float StashDistance = 35.f; //!< Releasing an item this close to the head puts it into the inventory
+
+Entity * findItemInReach(const Vec3f & hand) {
+	
+	Entity * best = nullptr;
+	float bestDistance = GrabReach;
+	for(Entity & entity : entities.inScene(IO_ITEM)) {
+		if(!(entity.gameFlags & GFLAG_INTERACTIVITY) || entity.show != SHOW_FLAG_IN_SCENE
+		   || entity.owner() || !entity.obj) {
+			continue;
+		}
+		float distance = glm::distance(entity.pos, hand);
+		if(distance < bestDistance) {
+			best = &entity;
+			bestDistance = distance;
+		}
+	}
+	
+	return best;
+}
+
+void takeItem(Entity & item) {
+	
+	item.setOwner(nullptr);
+	if(item.obj && item.obj->pbox) {
+		item.obj->pbox->active = 0;
+	}
+	item.show = SHOW_FLAG_IN_SCENE;
+	
+	g_grab.held = item.index();
+	g_grab.offset = item.pos - g_grab.hand;
+	
+	ARX_PLAYER_Remove_Invisibility();
+	ARX_SOUND_PlayInterface(g_snd.INVSTD);
+}
+
+void releaseItem(Entity & item) {
+	
+	g_grab.held = EntityHandle();
+	
+	if(g_camera && glm::distance(g_grab.hand, g_camera->m_pos) < StashDistance) {
+		// Over the shoulder into the backpack
+		if(item.ioflags & IO_GOLD) {
+			ARX_PLAYER_AddGold(&item);
+			return;
+		}
+		if(entities.player()->inventory && entities.player()->inventory->insert(&item)) {
+			ARX_SOUND_PlayInterface(g_snd.INVSTD);
+			return;
+		}
+	}
+	
+	item.show = SHOW_FLAG_IN_SCENE;
+	item.soundtime = 0;
+	item.soundcount = 0;
+	item.gameFlags &= ~GFLAG_NOCOMPUTATION;
+	if(item.obj && item.obj->pbox) {
+		// Throw with the hand's velocity (the physics scale launch vectors by 250)
+		Vec3f velocity = g_grab.velocity;
+		float speed = glm::length(velocity);
+		if(speed > 1500.f) {
+			velocity *= 1500.f / speed;
+		}
+		EERIE_PHYSICS_BOX_Launch(item.obj, item.pos, item.angle, velocity / 250.f + Vec3f(0.f, 0.01f, 0.f));
+		if(speed > 300.f) {
+			ARX_SOUND_PlaySFX(g_snd.WHOOSH, &item.pos);
+		}
+	}
+}
+
 } // anonymous namespace
+
+void updateGrab() {
+	
+	Vec3f hand;
+	glm::mat3 orientation;
+	bool valid = entities.player() && xr::getHandPose(xr::RightHand, true, hand, orientation)
+	             && !g_weaponGrip.valid && !BLOCK_PLAYER_CONTROLS;
+	
+	float seconds = toMsf(g_platformTime.lastFrameDuration()) / 1000.f;
+	if(valid && g_grab.handValid && seconds > 0.f) {
+		g_grab.velocity = (hand - g_grab.hand) / seconds;
+	} else {
+		g_grab.velocity = Vec3f(0.f);
+	}
+	g_grab.handValid = valid;
+	g_grab.hand = hand;
+	
+	Entity * held = entities.get(g_grab.held);
+	if(held) {
+		if(!valid || !xr::isGrabbing() || held->show != SHOW_FLAG_IN_SCENE) {
+			releaseItem(*held);
+		} else {
+			ARX_INTERACTIVE_Teleport(held, hand + g_grab.offset, true);
+		}
+		xr::setGrabCandidate(false);
+		return;
+	}
+	g_grab.held = EntityHandle();
+	
+	Entity * candidate = valid ? findItemInReach(hand) : nullptr;
+	xr::setGrabCandidate(candidate != nullptr);
+	if(!candidate) {
+		return;
+	}
+	
+	candidate->highlightColor = Color3f::gray(40.f);
+	if(xr::isGrabbing()) {
+		takeItem(*candidate);
+	}
+	
+}
 
 void updateCombat() {
 	

@@ -130,6 +130,8 @@ static bool bodyYawValid = false;
 static float bodyYaw = 0.f;
 static float playerYaw = 0.f; //!< Body + head yaw as last given to the player
 static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (degrees)
+static bool grabCandidate = false; //!< Something is within reach of the right hand
+static bool grabbing = false; //!< The current right grip press is a grab
 
 // Controller input mapped to the game
 static input::Controls controls;
@@ -806,6 +808,14 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii) {
 	return true;
 }
 
+void setGrabCandidate(bool available) {
+	state::grabCandidate = available;
+}
+
+bool isGrabbing() {
+	return state::grabbing;
+}
+
 bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position) {
 	
 	if(hand < 0 || hand >= input::HandCount) {
@@ -1044,8 +1054,14 @@ static void updateControls() {
 	state::actions[CONTROLS_CUST_WALKBACKWARD] = controls.move.y < -deadzone;
 	state::actions[CONTROLS_CUST_STRAFELEFT] = controls.move.x < -deadzone;
 	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > deadzone;
-	// Take / use / open what the crosshair points at (the right mouse button toggles free look)
-	state::actions[CONTROLS_CUST_USE] = controls.use;
+	// Take / use / open what the crosshair points at (the right mouse button toggles free look),
+	// unless the grip grabs something within reach of the hand
+	if(controls.use && !previous.use) {
+		state::grabbing = state::grabCandidate;
+	} else if(!controls.use) {
+		state::grabbing = false;
+	}
+	state::actions[CONTROLS_CUST_USE] = controls.use && !state::grabbing;
 	state::actions[CONTROLS_CUST_JUMP] = controls.jump;
 	// Switch to the cursor to click HUD icons (e.g. climbing), and back to free look
 	state::actions[CONTROLS_CUST_FREELOOK] = controls.freelook;

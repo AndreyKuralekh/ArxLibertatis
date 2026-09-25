@@ -1760,6 +1760,7 @@ void ArxGame::updateLevel() {
 	#if ARX_HAVE_OPENXR
 	if(xr::isActive()) {
 		vr::updateCombat();
+		vr::updateGrab();
 	}
 	#endif
 	
