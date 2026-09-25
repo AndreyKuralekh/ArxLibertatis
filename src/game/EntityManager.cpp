@@ -98,6 +98,14 @@ void EntityManager::init() {
 
 void EntityManager::clear() {
 	
+	// Detach entities from their owners while all of them still exist: an owner (container, NPC)
+	// may come before the entities it owns and would leave them with a dangling owner.
+	for(size_t i = 1; i < size(); i++) {
+		if(entries[i]) {
+			entries[i]->setOwner(nullptr);
+		}
+	}
+	
 	// Free all entities, ignoring the player.
 	for(size_t i = 1; i < size(); i++) {
 		delete entries[i];
