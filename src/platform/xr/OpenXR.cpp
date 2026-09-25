@@ -38,6 +38,7 @@
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "core/Application.h"
 #include "core/Config.h"
@@ -123,6 +124,12 @@ static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (deg
 static input::Controls controls;
 static bool pointerValid = false;
 static Vec2s pointer(0);
+static Vec3f pointerOrigin(0.f); //!< Controller position in the local space
+static Vec3f pointerHit(0.f); //!< Where the pointer hits the UI panel in the local space
+
+// The UI panel turns lazily to stay in front of the head
+static float panelYaw = 0.f;
+static bool panelTurning = false;
 static int wheel = 0;
 static std::array<bool, NUM_ACTION_KEY> actions;
 static std::array<bool, NUM_ACTION_KEY> previousActions;
@@ -619,6 +626,8 @@ static void recenterNow() {
 	state::recenterPosition = { head.x, head.y, head.z };
 	state::recenterYaw = getYaw(toMat3(state::views[0].pose.orientation));
 	state::recenterRequested = false;
+	state::panelYaw = state::recenterYaw;
+	state::panelTurning = false;
 	
 	LogInfo << "VR view recentered at height " << head.y << " m";
 }
@@ -762,14 +771,14 @@ void bindUi(bool clear) {
 
 //! Pose and size of the UI panel in the local space
 static void getPanel(glm::quat & orientation, Vec3f & center, Vec2f & size) {
-	orientation = glm::angleAxis(state::recenterYaw, Vec3f(0.f, 1.f, 0.f));
+	orientation = glm::angleAxis(state::panelYaw, Vec3f(0.f, 1.f, 0.f));
 	center = toVec3(state::recenterPosition) + orientation * Vec3f(0.f, 0.f, -config.vr.uiDistance);
 	Vec2i pixels = getUiSize();
 	size = Vec2f(config.vr.uiWidth, config.vr.uiWidth * float(pixels.y) / float(pixels.x));
 }
 
 //! Where the pointing ray of the controller hits the UI panel, in panel pixels
-static bool intersectPanel(const XrPosef & aim, Vec2s & result) {
+static bool intersectPanel(const XrPosef & aim, Vec2s & result, Vec3f & hitPoint) {
 	
 	glm::quat orientation;
 	Vec3f center;
@@ -789,7 +798,8 @@ static bool intersectPanel(const XrPosef & aim, Vec2s & result) {
 		return false;
 	}
 	
-	Vec3f hit = glm::inverse(orientation) * (origin + direction * distance - center);
+	hitPoint = origin + direction * distance;
+	Vec3f hit = glm::inverse(orientation) * (hitPoint - center);
 	Vec2f uv(hit.x / size.x + 0.5f, 0.5f - hit.y / size.y);
 	if(uv.x < 0.f || uv.x >= 1.f || uv.y < 0.f || uv.y >= 1.f) {
 		return false;
@@ -800,6 +810,107 @@ static bool intersectPanel(const XrPosef & aim, Vec2s & result) {
 	return true;
 }
 
+//! Turn the UI panel after the head when it looks away from the panel for more than a threshold
+static void updatePanel() {
+	
+	const float threshold = glm::radians(40.f);
+	const float stop = glm::radians(2.f);
+	
+	float headYaw = getYaw(toMat3(state::views[0].pose.orientation));
+	float offset = std::remainder(headYaw - state::panelYaw, 2.f * glm::pi<float>());
+	if(!state::panelTurning && std::abs(offset) > threshold) {
+		state::panelTurning = true;
+	}
+	if(state::panelTurning) {
+		// Ease towards the view direction over roughly half a second
+		state::panelYaw += offset * 0.1f;
+		if(std::abs(offset) < stop) {
+			state::panelTurning = false;
+		}
+	}
+	
+}
+
+//! Projection with the usual OpenGL conventions for drawing in the local space
+static glm::mat4 createLocalProjection(const XrFovf & fov, float nearDist, float farDist) {
+	float left = std::tan(fov.angleLeft);
+	float right = std::tan(fov.angleRight);
+	float up = std::tan(fov.angleUp);
+	float down = std::tan(fov.angleDown);
+	glm::mat4 projection(0.f);
+	projection[0][0] = 2.f / (right - left);
+	projection[1][1] = 2.f / (up - down);
+	projection[2][0] = (right + left) / (right - left);
+	projection[2][1] = (up + down) / (up - down);
+	projection[2][2] = -(farDist + nearDist) / (farDist - nearDist);
+	projection[2][3] = -1.f;
+	projection[3][2] = -2.f * farDist * nearDist / (farDist - nearDist);
+	return projection;
+}
+
+//! Draw the pointing ray of the controller into the eye images, over everything else
+static void drawPointerBeam() {
+	
+	if(!state::pointerValid || !state::viewsValid) {
+		return;
+	}
+	
+	glPushAttrib(GL_ALL_ATTRIB_BITS);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	
+	GLint textureUnits = 1;
+	glGetIntegerv(GL_MAX_TEXTURE_UNITS, &textureUnits);
+	for(GLint i = 0; i < textureUnits; i++) {
+		glActiveTexture(GLenum(GL_TEXTURE0 + i));
+		glDisable(GL_TEXTURE_2D);
+	}
+	glActiveTexture(GL_TEXTURE0);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_FOG);
+	glDisable(GL_ALPHA_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_SCISSOR_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glLineWidth(3.f);
+	
+	for(size_t i = 0; i < EyeCount; i++) {
+		const Swapchain & eye = state::eyes[i];
+		if(!eye.acquired) {
+			continue;
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, eye.framebuffers[eye.current]);
+		glViewport(0, 0, eye.size.x, eye.size.y);
+		const XrView & view = state::views[i];
+		glm::mat4 projection = createLocalProjection(view.fov, 0.05f, 100.f);
+		glm::mat4 pose = glm::translate(glm::mat4(1.f), toVec3(view.pose.position));
+		pose *= glm::mat4_cast(glm::quat(view.pose.orientation.w, view.pose.orientation.x,
+		                                 view.pose.orientation.y, view.pose.orientation.z));
+		glm::mat4 viewMatrix = glm::inverse(pose);
+		glMatrixMode(GL_PROJECTION);
+		glLoadMatrixf(glm::value_ptr(projection));
+		glMatrixMode(GL_MODELVIEW);
+		glLoadMatrixf(glm::value_ptr(viewMatrix));
+		glBegin(GL_LINES);
+		glColor4f(0.6f, 0.8f, 1.f, 0.2f);
+		glVertex3f(state::pointerOrigin.x, state::pointerOrigin.y, state::pointerOrigin.z);
+		glColor4f(0.6f, 0.8f, 1.f, 0.9f);
+		glVertex3f(state::pointerHit.x, state::pointerHit.y, state::pointerHit.z);
+		glEnd();
+	}
+	
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glPopAttrib();
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	
+}
+
 //! Map the controller state of this frame to mouse, key and action state for the game
 static void updateControls() {
 	
@@ -807,7 +918,8 @@ static void updateControls() {
 	state::controls = input::getControls();
 	const input::Controls & controls = state::controls;
 	
-	state::pointerValid = controls.aimValid && intersectPanel(controls.aim, state::pointer);
+	state::pointerValid = controls.aimValid && intersectPanel(controls.aim, state::pointer, state::pointerHit);
+	state::pointerOrigin = toVec3(controls.aim.position);
 	
 	// Thumbstick flicks: snap turns and mouse wheel steps
 	const float flick = 0.7f;
@@ -911,6 +1023,9 @@ void beginFrame() {
 		}
 		if(state::viewsValid && state::recenterRequested) {
 			recenterNow();
+		}
+		if(state::viewsValid) {
+			updatePanel();
 		}
 		if(state::sessionState == XR_SESSION_STATE_FOCUSED) {
 			input::sync(state::session, state::localSpace, state::frameState.predictedDisplayTime);
@@ -1059,6 +1174,7 @@ void endFrame() {
 	bool uiReady = state::ui.acquired;
 	if(state::frameState.shouldRender) {
 		clearUnusedEyes();
+		drawPointerBeam();
 		mirrorToWindow();
 		dumpFrame();
 	}
@@ -1094,13 +1210,13 @@ void endFrame() {
 		quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 		quad.subImage.swapchain = state::ui.handle;
 		quad.subImage.imageRect.extent = { state::ui.size.x, state::ui.size.y };
-		// In front of the recentered head, facing it
-		glm::quat facing = glm::angleAxis(state::recenterYaw, Vec3f(0.f, 1.f, 0.f));
-		Vec3f position = toVec3(state::recenterPosition) + facing * Vec3f(0.f, 0.f, -config.vr.uiDistance);
+		glm::quat facing;
+		Vec3f position;
+		Vec2f size;
+		getPanel(facing, position, size);
 		quad.pose.orientation = { facing.x, facing.y, facing.z, facing.w };
 		quad.pose.position = { position.x, position.y, position.z };
-		quad.size.width = config.vr.uiWidth;
-		quad.size.height = config.vr.uiWidth * float(state::ui.size.y) / float(state::ui.size.x);
+		quad.size = { size.x, size.y };
 		layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader *>(&quad));
 	}
 	
