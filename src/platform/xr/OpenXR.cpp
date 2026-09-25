@@ -114,6 +114,17 @@ static std::array<glm::mat4x4, 2> eyeProjection;
 //! The UI panel was cleared to transparent this frame and is drawn over the world
 static bool uiOverlay = false;
 
+// Enabled instance extensions
+static bool handTracking = false;
+static bool controllerHands = false;
+
+// Transform from the local space to the game world of the current frame, see applyHeadPose()
+static bool worldValid = false;
+static Vec3f worldOrigin(0.f);
+static glm::mat3 worldBody(1.f);
+static glm::mat3 worldUnyaw(1.f);
+static Vec3f worldTrackingOrigin(0.f);
+
 // Direction of the player's body in the game world (degrees) - the head turns relative to it
 static bool bodyYawValid = false;
 static float bodyYaw = 0.f;
@@ -202,12 +213,18 @@ static bool createInstance() {
 	}
 	
 	bool hasOpenGL = false;
+	bool hasHandTracking = false;
+	bool hasHandTrackingDataSource = false;
 	for(const XrExtensionProperties & extension : available) {
 		if(state::debug) {
 			LogInfo << "OpenXR extension: " << extension.extensionName << " v" << extension.extensionVersion;
 		}
 		if(std::strcmp(extension.extensionName, XR_KHR_OPENGL_ENABLE_EXTENSION_NAME) == 0) {
 			hasOpenGL = true;
+		} else if(std::strcmp(extension.extensionName, XR_EXT_HAND_TRACKING_EXTENSION_NAME) == 0) {
+			hasHandTracking = true;
+		} else if(std::strcmp(extension.extensionName, XR_EXT_HAND_TRACKING_DATA_SOURCE_EXTENSION_NAME) == 0) {
+			hasHandTrackingDataSource = true;
 		}
 	}
 	if(!hasOpenGL) {
@@ -216,6 +233,14 @@ static bool createInstance() {
 	}
 	
 	std::vector<const char *> extensions = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+	if(hasHandTracking) {
+		extensions.push_back(XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+		state::handTracking = true;
+		if(hasHandTrackingDataSource) {
+			extensions.push_back(XR_EXT_HAND_TRACKING_DATA_SOURCE_EXTENSION_NAME);
+			state::controllerHands = true;
+		}
+	}
 	
 	XrInstanceCreateInfo info = { XR_TYPE_INSTANCE_CREATE_INFO };
 	std::snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "%s", "Arx Libertatis VR");
@@ -728,7 +753,65 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 		state::eyeFromCamera[i] = matrix;
 	}
 	
+	state::worldValid = true;
+	state::worldOrigin = base.m_pos;
+	state::worldBody = body;
+	state::worldUnyaw = unyaw;
+	state::worldTrackingOrigin = origin;
+	
 	return &state::camera;
+}
+
+static Vec3f localToWorld(const XrVector3f & position) {
+	return state::worldOrigin + state::worldBody * (flipYZ * (state::worldUnyaw * (toVec3(position) - state::worldTrackingOrigin))
+	                                                * config.vr.worldScale);
+}
+
+static glm::mat3 localToWorld(const XrQuaternionf & orientation) {
+	return state::worldBody * flipYZ * state::worldUnyaw * toMat3(orientation) * flipYZ;
+}
+
+bool getHandPose(int hand, bool grip, Vec3f & position, glm::mat3 & orientation) {
+	
+	if(!state::worldValid || hand < 0 || hand >= input::HandCount) {
+		return false;
+	}
+	
+	const input::HandState & state = input::getControls().hands[size_t(hand)];
+	if(!(grip ? state.gripValid : state.aimValid)) {
+		return false;
+	}
+	
+	const XrPosef & pose = grip ? state.grip : state.aim;
+	position = localToWorld(pose.position);
+	orientation = localToWorld(pose.orientation);
+	return true;
+}
+
+bool getHandJoints(int hand, Vec3f * positions, float * radii) {
+	
+	if(!state::worldValid || hand < 0 || hand >= input::HandCount) {
+		return false;
+	}
+	
+	const input::HandState & state = input::getControls().hands[size_t(hand)];
+	if(!state.jointsValid) {
+		return false;
+	}
+	
+	for(size_t i = 0; i < state.joints.size(); i++) {
+		positions[i] = localToWorld(state.joints[i].pose.position);
+		radii[i] = state.joints[i].radius * config.vr.worldScale;
+	}
+	return true;
+}
+
+float getHandTrigger(int hand) {
+	return (hand >= 0 && hand < input::HandCount) ? input::getControls().hands[size_t(hand)].trigger : 0.f;
+}
+
+float getHandSqueeze(int hand) {
+	return (hand >= 0 && hand < input::HandCount) ? input::getControls().hands[size_t(hand)].squeeze : 0.f;
 }
 
 void bindEye(size_t eye) {
@@ -1009,6 +1092,7 @@ void beginFrame() {
 		return;
 	}
 	state::frameBegun = true;
+	state::worldValid = false;
 	
 	state::viewsValid = false;
 	if(state::frameState.shouldRender) {
@@ -1249,7 +1333,7 @@ bool initialize() {
 		return false;
 	}
 	
-	if(!input::create(state::instance, state::session)) {
+	if(!input::create(state::instance, state::session, state::handTracking, state::controllerHands)) {
 		LogWarning << "VR controllers are not available";
 	}
 	

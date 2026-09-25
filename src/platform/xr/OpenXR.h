@@ -114,6 +114,27 @@ void bindUi(bool clear);
 void recenter();
 
 /*
+ * Hands in the game world, valid after applyHeadPose() in the current frame.
+ * Orientations map from the game's view conventions (x right, y down, z forward) to world space.
+ */
+
+constexpr int LeftHand = 0;
+constexpr int RightHand = 1;
+
+//! Number of hand joints, in the order of XrHandJointEXT (palm, wrist, thumb, index, middle, ring, little)
+constexpr size_t HandJointCount = 26;
+
+//! \param grip true for the holding pose, false for the pointing pose
+bool getHandPose(int hand, bool grip, Vec3f & position, glm::mat3 & orientation);
+
+//! Finger joint positions and radii in world units, if the runtime tracks the fingers
+bool getHandJoints(int hand, Vec3f * positions, float * radii);
+
+//! Analog trigger and grip values from 0 to 1
+float getHandTrigger(int hand);
+float getHandSqueeze(int hand);
+
+/*
  * VR controller input for the game, updated once per frame. The right controller points at the
  * UI panel like a mouse, the other buttons act as game actions. Mouse button and key ids are
  * those from input/Mouse.h and input/Keyboard.h, actions are ControlAction values.

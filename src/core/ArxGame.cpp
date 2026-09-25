@@ -182,6 +182,7 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #if ARX_HAVE_OPENXR
 #include "gui/Note.h"
 #include "platform/xr/OpenXR.h"
+#include "platform/xr/VRGameplay.h"
 #endif
 
 InfoPanels g_debugInfo = InfoPanelNone;
@@ -1955,12 +1956,15 @@ void ArxGame::renderLevelStereo() {
 	// between the eyes and covers both. Each eye re-projects it on the GPU, so everything that
 	// updates state or queues geometry for the render batcher runs only once per frame.
 	
+	vr::prepareHands();
+	
 	for(size_t eye = 0; eye < xr::EyeCount; eye++) {
 		xr::bindEye(eye);
 		GRenderer->Clear(Renderer::ColorBuffer | Renderer::DepthBuffer, g_fogColor);
 		GRenderer->SetFogParams(fZFogStart * g_camera->cdepth, fZFogEnd * g_camera->cdepth);
 		GRenderer->SetFogColor(g_fogColor);
 		ARX_SCENE_Render(/* stereoPass = */ true);
+		vr::renderHands();
 	}
 	
 	// Effects and screen overlays are updated once and drawn into the UI panel or the batcher

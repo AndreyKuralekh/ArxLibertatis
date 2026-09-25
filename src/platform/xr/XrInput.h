@@ -20,6 +20,8 @@
 #ifndef ARX_PLATFORM_XR_XRINPUT_H
 #define ARX_PLATFORM_XR_XRINPUT_H
 
+#include <array>
+
 #include <openxr/openxr.h>
 
 /*!
@@ -30,8 +32,33 @@
  */
 namespace xr::input {
 
+//! Pose, analog values and finger joints of one hand
+struct HandState {
+	
+	bool gripValid = false;
+	XrPosef grip = { { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } }; //!< Holding pose in the local space
+	bool aimValid = false;
+	XrPosef aim = { { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } }; //!< Pointing pose in the local space
+	
+	float trigger = 0.f;
+	float squeeze = 0.f;
+	
+	//! Finger joints from hand tracking (XR_EXT_hand_tracking) in the local space, if available
+	bool jointsValid = false;
+	std::array<XrHandJointLocationEXT, XR_HAND_JOINT_COUNT_EXT> joints;
+	
+};
+
+enum Hand {
+	LeftHand = 0,
+	RightHand = 1,
+	HandCount = 2
+};
+
 //! Raw controller state of one frame
 struct Controls {
+	
+	std::array<HandState, HandCount> hands;
 	
 	bool aimValid = false;
 	XrPosef aim = { { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } }; //!< Right hand pointing pose in the local space
@@ -53,8 +80,13 @@ struct Controls {
 	
 };
 
-//! Create the actions and attach them to the session
-bool create(XrInstance instance, XrSession session);
+/*!
+ * Create the actions and attach them to the session.
+ *
+ * \param handTracking     XR_EXT_hand_tracking is enabled on the instance
+ * \param controllerHands XR_EXT_hand_tracking_data_source is enabled: also get finger joints while holding controllers
+ */
+bool create(XrInstance instance, XrSession session, bool handTracking, bool controllerHands);
 
 //! Destroy the actions and action spaces
 void destroy();

@@ -1614,7 +1614,8 @@ void ARX_SCENE_Render(bool stereoPass) {
 	PopAllTriangleListOpaque();
 	
 	// *Now* draw the player
-	if(entities.player()->animlayer[0].cur_anim) {
+	// In VR the player has hands of their own instead of the first person model
+	if(entities.player()->animlayer[0].cur_anim && !(stereoPass && !EXTERNALVIEW)) {
 		float invisibility = std::min(0.9f, entities.player()->invisibility);
 		AnimatedEntityRender(entities.player(), invisibility);
 		if(!EXTERNALVIEW) {

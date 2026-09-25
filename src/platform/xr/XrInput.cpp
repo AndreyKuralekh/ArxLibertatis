@@ -40,13 +40,26 @@ struct ActionState {
 	
 	XrActionSet set = XR_NULL_HANDLE;
 	
+	std::array<XrPath, HandCount> handPaths = { XR_NULL_PATH, XR_NULL_PATH };
+	
+	// Per hand, using subaction paths
 	XrAction aim = XR_NULL_HANDLE;
-	XrSpace aimSpace = XR_NULL_HANDLE;
+	XrAction grip = XR_NULL_HANDLE;
+	XrAction trigger = XR_NULL_HANDLE;
+	XrAction squeeze = XR_NULL_HANDLE;
+	std::array<XrSpace, HandCount> aimSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+	std::array<XrSpace, HandCount> gripSpaces = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 	
 	XrAction move = XR_NULL_HANDLE;
 	XrAction turn = XR_NULL_HANDLE;
 	
 	std::vector<BooleanAction> buttons;
+	
+	// XR_EXT_hand_tracking
+	PFN_xrCreateHandTrackerEXT createHandTracker = nullptr;
+	PFN_xrDestroyHandTrackerEXT destroyHandTracker = nullptr;
+	PFN_xrLocateHandJointsEXT locateHandJoints = nullptr;
+	std::array<XrHandTrackerEXT, HandCount> handTrackers = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 	
 	Controls controls;
 	
@@ -62,12 +75,16 @@ bool xrInputCheck(XrResult result, const char * what) {
 	return true;
 }
 
-XrAction createAction(XrActionType type, const char * name, const char * localizedName) {
+XrAction createAction(XrActionType type, const char * name, const char * localizedName, bool perHand = false) {
 	
 	XrActionCreateInfo info = { XR_TYPE_ACTION_CREATE_INFO };
 	info.actionType = type;
 	std::snprintf(info.actionName, XR_MAX_ACTION_NAME_SIZE, "%s", name);
 	std::snprintf(info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "%s", localizedName);
+	if(perHand) {
+		info.countSubactionPaths = uint32_t(g_xrInput.handPaths.size());
+		info.subactionPaths = g_xrInput.handPaths.data();
+	}
 	
 	XrAction action = XR_NULL_HANDLE;
 	if(!xrInputCheck(xrCreateAction(g_xrInput.set, &info, &action), name)) {
@@ -109,19 +126,96 @@ bool suggestBindings(XrInstance instance, const char * profile, const std::vecto
 	return true;
 }
 
+XrSpace createHandSpace(XrSession session, XrAction action, Hand hand) {
+	XrActionSpaceCreateInfo info = { XR_TYPE_ACTION_SPACE_CREATE_INFO };
+	info.action = action;
+	info.subactionPath = g_xrInput.handPaths[hand];
+	info.poseInActionSpace.orientation.w = 1.f;
+	XrSpace space = XR_NULL_HANDLE;
+	xrInputCheck(xrCreateActionSpace(session, &info, &space), "xrCreateActionSpace");
+	return space;
+}
+
+bool locate(XrSpace handSpace, XrSpace space, XrTime time, XrPosef & pose) {
+	if(handSpace == XR_NULL_HANDLE) {
+		return false;
+	}
+	XrSpaceLocation location = { XR_TYPE_SPACE_LOCATION };
+	if(XR_FAILED(xrLocateSpace(handSpace, space, time, &location))) {
+		return false;
+	}
+	const XrSpaceLocationFlags valid = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	if((location.locationFlags & valid) != valid) {
+		return false;
+	}
+	pose = location.pose;
+	return true;
+}
+
+float getFloat(XrSession session, XrAction action, Hand hand) {
+	XrActionStateGetInfo getInfo = { XR_TYPE_ACTION_STATE_GET_INFO };
+	getInfo.action = action;
+	getInfo.subactionPath = g_xrInput.handPaths[hand];
+	XrActionStateFloat state = { XR_TYPE_ACTION_STATE_FLOAT };
+	if(XR_SUCCEEDED(xrGetActionStateFloat(session, &getInfo, &state)) && state.isActive) {
+		return state.currentState;
+	}
+	return 0.f;
+}
+
+void createHandTrackers(XrInstance instance, XrSession session, bool controllerHands) {
+	
+	ActionState & a = g_xrInput;
+	if(XR_FAILED(xrGetInstanceProcAddr(instance, "xrCreateHandTrackerEXT",
+	                                   reinterpret_cast<PFN_xrVoidFunction *>(&a.createHandTracker)))
+	   || XR_FAILED(xrGetInstanceProcAddr(instance, "xrDestroyHandTrackerEXT",
+	                                      reinterpret_cast<PFN_xrVoidFunction *>(&a.destroyHandTracker)))
+	   || XR_FAILED(xrGetInstanceProcAddr(instance, "xrLocateHandJointsEXT",
+	                                      reinterpret_cast<PFN_xrVoidFunction *>(&a.locateHandJoints)))) {
+		LogWarning << "OpenXR input: hand tracking functions not available";
+		return;
+	}
+	
+	// Also get finger joints (estimated from the controller) while holding controllers
+	XrHandTrackingDataSourceEXT sources[] = {
+		XR_HAND_TRACKING_DATA_SOURCE_UNOBSTRUCTED_EXT,
+		XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT
+	};
+	XrHandTrackingDataSourceInfoEXT sourceInfo = { XR_TYPE_HAND_TRACKING_DATA_SOURCE_INFO_EXT };
+	sourceInfo.requestedDataSourceCount = uint32_t(std::size(sources));
+	sourceInfo.requestedDataSources = sources;
+	
+	for(Hand hand : { LeftHand, RightHand }) {
+		XrHandTrackerCreateInfoEXT info = { XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT };
+		info.next = controllerHands ? &sourceInfo : nullptr;
+		info.hand = (hand == LeftHand) ? XR_HAND_LEFT_EXT : XR_HAND_RIGHT_EXT;
+		info.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+		if(!xrInputCheck(a.createHandTracker(session, &info, &a.handTrackers[hand]), "xrCreateHandTrackerEXT")) {
+			a.handTrackers[hand] = XR_NULL_HANDLE;
+		}
+	}
+	
+	LogInfo << "OpenXR hand tracking ready" << (controllerHands ? " (also with controllers)" : "");
+}
+
 } // anonymous namespace
 
-bool create(XrInstance instance, XrSession session) {
+bool create(XrInstance instance, XrSession session, bool handTracking, bool controllerHands) {
+	
+	ActionState & a = g_xrInput;
+	a.handPaths = { toPath(instance, "/user/hand/left"), toPath(instance, "/user/hand/right") };
 	
 	XrActionSetCreateInfo setInfo = { XR_TYPE_ACTION_SET_CREATE_INFO };
 	std::snprintf(setInfo.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "gameplay");
 	std::snprintf(setInfo.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s", "Gameplay");
-	if(!xrInputCheck(xrCreateActionSet(instance, &setInfo, &g_xrInput.set), "xrCreateActionSet")) {
+	if(!xrInputCheck(xrCreateActionSet(instance, &setInfo, &a.set), "xrCreateActionSet")) {
 		return false;
 	}
 	
-	ActionState & a = g_xrInput;
-	a.aim = createAction(XR_ACTION_TYPE_POSE_INPUT, "aim", "Point");
+	a.aim = createAction(XR_ACTION_TYPE_POSE_INPUT, "aim", "Point", true);
+	a.grip = createAction(XR_ACTION_TYPE_POSE_INPUT, "grip", "Hold", true);
+	a.trigger = createAction(XR_ACTION_TYPE_FLOAT_INPUT, "trigger_value", "Trigger", true);
+	a.squeeze = createAction(XR_ACTION_TYPE_FLOAT_INPUT, "squeeze_value", "Grip", true);
 	a.move = createAction(XR_ACTION_TYPE_VECTOR2F_INPUT, "move", "Move");
 	a.turn = createAction(XR_ACTION_TYPE_VECTOR2F_INPUT, "turn", "Turn and scroll");
 	
@@ -145,7 +239,14 @@ bool create(XrInstance instance, XrSession session) {
 	XrAction freelook = button("freelook", "Free look / cursor", &Controls::freelook);
 	
 	bool touch = suggestBindings(instance, "/interaction_profiles/oculus/touch_controller", {
+		{ a.aim, "/user/hand/left/input/aim/pose" },
 		{ a.aim, "/user/hand/right/input/aim/pose" },
+		{ a.grip, "/user/hand/left/input/grip/pose" },
+		{ a.grip, "/user/hand/right/input/grip/pose" },
+		{ a.trigger, "/user/hand/left/input/trigger/value" },
+		{ a.trigger, "/user/hand/right/input/trigger/value" },
+		{ a.squeeze, "/user/hand/left/input/squeeze/value" },
+		{ a.squeeze, "/user/hand/right/input/squeeze/value" },
 		{ a.move, "/user/hand/left/input/thumbstick" },
 		{ a.turn, "/user/hand/right/input/thumbstick" },
 		{ select, "/user/hand/right/input/trigger/value" },
@@ -162,7 +263,10 @@ bool create(XrInstance instance, XrSession session) {
 	});
 	
 	bool simple = suggestBindings(instance, "/interaction_profiles/khr/simple_controller", {
+		{ a.aim, "/user/hand/left/input/aim/pose" },
 		{ a.aim, "/user/hand/right/input/aim/pose" },
+		{ a.grip, "/user/hand/left/input/grip/pose" },
+		{ a.grip, "/user/hand/right/input/grip/pose" },
 		{ select, "/user/hand/right/input/select/click" },
 		{ menu, "/user/hand/left/input/menu/click" },
 	});
@@ -171,11 +275,9 @@ bool create(XrInstance instance, XrSession session) {
 		return false;
 	}
 	
-	XrActionSpaceCreateInfo spaceInfo = { XR_TYPE_ACTION_SPACE_CREATE_INFO };
-	spaceInfo.action = a.aim;
-	spaceInfo.poseInActionSpace.orientation.w = 1.f;
-	if(!xrInputCheck(xrCreateActionSpace(session, &spaceInfo, &a.aimSpace), "xrCreateActionSpace")) {
-		return false;
+	for(Hand hand : { LeftHand, RightHand }) {
+		a.aimSpaces[hand] = createHandSpace(session, a.aim, hand);
+		a.gripSpaces[hand] = createHandSpace(session, a.grip, hand);
 	}
 	
 	XrSessionActionSetsAttachInfo attachInfo = { XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
@@ -185,6 +287,10 @@ bool create(XrInstance instance, XrSession session) {
 		return false;
 	}
 	
+	if(handTracking) {
+		createHandTrackers(instance, session, controllerHands);
+	}
+	
 	LogInfo << "OpenXR controller actions ready";
 	
 	return true;
@@ -192,12 +298,22 @@ bool create(XrInstance instance, XrSession session) {
 
 void destroy() {
 	
-	if(g_xrInput.aimSpace != XR_NULL_HANDLE) {
-		xrDestroySpace(g_xrInput.aimSpace);
+	ActionState & a = g_xrInput;
+	for(XrHandTrackerEXT tracker : a.handTrackers) {
+		if(tracker != XR_NULL_HANDLE && a.destroyHandTracker) {
+			a.destroyHandTracker(tracker);
+		}
 	}
-	if(g_xrInput.set != XR_NULL_HANDLE) {
+	for(Hand hand : { LeftHand, RightHand }) {
+		for(XrSpace space : { a.aimSpaces[hand], a.gripSpaces[hand] }) {
+			if(space != XR_NULL_HANDLE) {
+				xrDestroySpace(space);
+			}
+		}
+	}
+	if(a.set != XR_NULL_HANDLE) {
 		// Also destroys the actions
-		xrDestroyActionSet(g_xrInput.set);
+		xrDestroyActionSet(a.set);
 	}
 	g_xrInput = ActionState();
 	
@@ -239,14 +355,30 @@ void sync(XrSession session, XrSpace space, XrTime time) {
 		}
 	}
 	
-	XrSpaceLocation location = { XR_TYPE_SPACE_LOCATION };
-	if(XR_SUCCEEDED(xrLocateSpace(a.aimSpace, space, time, &location))) {
-		const XrSpaceLocationFlags valid = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
-		if((location.locationFlags & valid) == valid) {
-			a.controls.aimValid = true;
-			a.controls.aim = location.pose;
+	for(Hand hand : { LeftHand, RightHand }) {
+		
+		HandState & state = a.controls.hands[hand];
+		state.aimValid = locate(a.aimSpaces[hand], space, time, state.aim);
+		state.gripValid = locate(a.gripSpaces[hand], space, time, state.grip);
+		state.trigger = getFloat(session, a.trigger, hand);
+		state.squeeze = getFloat(session, a.squeeze, hand);
+		
+		if(a.handTrackers[hand] != XR_NULL_HANDLE) {
+			XrHandJointsLocateInfoEXT locateInfo = { XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT };
+			locateInfo.baseSpace = space;
+			locateInfo.time = time;
+			XrHandJointLocationsEXT locations = { XR_TYPE_HAND_JOINT_LOCATIONS_EXT };
+			locations.jointCount = uint32_t(state.joints.size());
+			locations.jointLocations = state.joints.data();
+			if(XR_SUCCEEDED(a.locateHandJoints(a.handTrackers[hand], &locateInfo, &locations))) {
+				state.jointsValid = locations.isActive != XR_FALSE;
+			}
 		}
+		
 	}
+	
+	a.controls.aimValid = a.controls.hands[RightHand].aimValid;
+	a.controls.aim = a.controls.hands[RightHand].aim;
 	
 }
 

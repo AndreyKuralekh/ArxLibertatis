@@ -69,6 +69,7 @@ void ARX_SCENE_Update();
  * \param stereoPass Rendering one of several views of the same frame: skip effects that
  *                   advance their state or only queue geometry for the render batcher.
  *                   The caller must then call eyeball.render() and PolyBoomDraw() once.
+ *                   The first person player model is not drawn (VR hands replace it).
  */
 void ARX_SCENE_Render(bool stereoPass = false);
 bool ARX_SCENE_PORTAL_ClipIO(Entity * io, const Vec3f & position);
