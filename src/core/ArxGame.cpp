@@ -180,6 +180,7 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #endif
 
 #if ARX_HAVE_OPENXR
+#include "gui/Note.h"
 #include "platform/xr/OpenXR.h"
 #endif
 
@@ -1913,6 +1914,41 @@ void ArxGame::renderLevel() {
 }
 
 #if ARX_HAVE_OPENXR
+
+/*!
+ * Draw the free look crosshair in the 3D view, straight ahead of the head at a fixed distance.
+ * The UI panel does not move with the head, so the crosshair cannot be drawn there.
+ */
+static void drawStereoCrosshair() {
+	
+	if(!TRUE_PLAYER_MOUSELOOK_ON || !config.interface.showCrosshair
+	   || (player.Interface & (INTER_PLAYERBOOK | INTER_COMBATMODE)) || g_note.isOpen()) {
+		return;
+	}
+	
+	static TextureContainer * crosshair = TextureContainer::LoadUI("graph/interface/cursors/cruz");
+	if(!crosshair) {
+		return;
+	}
+	
+	// View space of the camera from updateActiveCamera(): x right, y down, z forward
+	const float distance = 150.f;
+	const float halfSize = distance * 0.015f;
+	const Vec2f corners[4] = { Vec2f(-1.f, -1.f), Vec2f(1.f, -1.f), Vec2f(1.f, 1.f), Vec2f(-1.f, 1.f) };
+	ColorRGBA color = Color::gray(0.5f).toRGBA();
+	TexturedVertex vertices[4];
+	for(size_t i = 0; i < 4; i++) {
+		Vec4f p = g_preparedCamera.m_viewToScreen * Vec4f(corners[i] * halfSize, distance, 1.f);
+		Vec2f uv = (corners[i] + Vec2f(1.f)) * 0.5f * crosshair->uv;
+		vertices[i] = TexturedVertex(Vec3f(p), p.w, color, uv);
+	}
+	
+	UseRenderState state(render2D().blendAdditive());
+	GRenderer->SetTexture(0, crosshair);
+	EERIEDRAWPRIM(Renderer::TriangleFan, vertices, 4);
+	
+}
+
 void ArxGame::renderLevelStereo() {
 	
 	// Most geometry is projected on the CPU for the camera from updateActiveCamera(), which sits
@@ -1966,6 +2002,7 @@ void ArxGame::renderLevelStereo() {
 		g_renderBatcher.render();
 		GRenderer->SetFogColor(g_fogColor);
 		renderLightFlares();
+		drawStereoCrosshair();
 	}
 	
 	xr::bindUi(/* clear = */ false);

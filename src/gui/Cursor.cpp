@@ -515,12 +515,8 @@ void ARX_INTERFACE_RenderCursor(bool flag) {
 			Vec2f pos = Vec2f(g_size.center());
 			#if ARX_HAVE_OPENXR
 			if(xr::isActive()) {
-				// In VR the crosshair is where the view direction crosses the UI panel, which does not move with the head
-				Vec2s gaze;
-				if(!xr::getGazePoint(gaze)) {
-					return;
-				}
-				pos = Vec2f(gaze);
+				// In VR the crosshair is drawn in the 3D view, see ArxGame::renderLevelStereo()
+				return;
 			}
 			#endif
 			Vec2f size = Vec2f(surf->m_size) * cursorScale;

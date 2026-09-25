@@ -37,7 +37,7 @@ struct Controls {
 	XrPosef aim = { { 0.f, 0.f, 0.f, 1.f }, { 0.f, 0.f, 0.f } }; //!< Right hand pointing pose in the local space
 	
 	bool select = false;    //!< Right trigger
-	bool use = false;       //!< Right grip
+	bool use = false;       //!< Right grip (use / take)
 	bool jump = false;      //!< A
 	bool crouch = false;    //!< B
 	bool inventory = false; //!< X
