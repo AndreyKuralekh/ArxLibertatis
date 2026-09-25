@@ -132,6 +132,7 @@ static float playerYaw = 0.f; //!< Body + head yaw as last given to the player
 static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (degrees)
 static bool grabCandidate = false; //!< Something is within reach of the right hand
 static bool grabbing = false; //!< The current right grip press is a grab
+static bool pointerEnabled = true;
 
 // Controller input mapped to the game
 static input::Controls controls;
@@ -713,7 +714,9 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 		return glm::transpose(viewToWorld);
 	};
 	
-	float farDist = base.cdepth;
+	// The draw distance is set on the active camera by the fog (ARX_GLOBALMODS_Apply()),
+	// which is this camera from the previous frame
+	float farDist = (state::camera.cdepth > 0.f) ? state::camera.cdepth : base.cdepth;
 	float nearDist = std::min(config.vr.nearPlane, farDist * 0.5f);
 	
 	float maxVertical = 0.f;
@@ -738,6 +741,7 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 	float fov = std::min(2.f * std::atan(halfTan) + glm::radians(10.f), glm::radians(170.f));
 	
 	state::camera = base;
+	state::camera.cdepth = farDist;
 	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
 	state::camera.m_pos = toWorldPosition({ head.x, head.y, head.z });
 	state::camera.angle = toCameraAngle(toWorldToView(state::views[0].pose.orientation));
@@ -806,6 +810,10 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii) {
 		radii[i] = state.joints[i].radius * config.vr.worldScale;
 	}
 	return true;
+}
+
+void setPointerEnabled(bool enabled) {
+	state::pointerEnabled = enabled;
 }
 
 void setGrabCandidate(bool available) {
@@ -1026,7 +1034,8 @@ static void updateControls() {
 	state::controls = input::getControls();
 	const input::Controls & controls = state::controls;
 	
-	state::pointerValid = controls.aimValid && intersectPanel(controls.aim, state::pointer, state::pointerHit);
+	state::pointerValid = state::pointerEnabled && controls.aimValid
+	                      && intersectPanel(controls.aim, state::pointer, state::pointerHit);
 	state::pointerOrigin = toVec3(controls.aim.position);
 	
 	// Thumbstick flicks: snap turns and mouse wheel steps

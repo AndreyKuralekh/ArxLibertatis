@@ -24,6 +24,8 @@
 
 #if ARX_HAVE_OPENXR
 
+#include "math/Types.h"
+
 /*!
  * VR interaction with the game world: the player's hands and what they hold.
  *
@@ -50,6 +52,22 @@ void renderHands();
  * Call once per frame after the camera was updated.
  */
 void updateGrab();
+
+/*!
+ * Rune drawing with the right index finger in magic mode.
+ *
+ * When a stroke starts (trigger pressed) a plane in front of the head is fixed. The fingertip is
+ * projected onto it for the rune recognizer, and the magic flares appear at the fingertip.
+ *
+ * Call once per frame after the camera was updated.
+ */
+void updateMagic();
+
+//! Point for the rune recognizer (in pixels, about 10 per cm of hand motion), if drawing with the hand
+bool getRuneRecognitionPoint(Vec2s & point);
+
+//! Screen position of the drawing fingertip for the magic flares, if drawing with the hand
+bool getRuneScreenPoint(Vec2s & point);
 
 /*!
  * Melee combat by swinging the controllers: the drawn weapon follows the right hand and hits

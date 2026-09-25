@@ -54,6 +54,12 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "graphics/data/Mesh.h"
 #include "platform/profiler/Profiler.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 GLOBAL_MODS g_currentFogParameters;
 GLOBAL_MODS g_desiredFogParameters;
 
@@ -114,6 +120,10 @@ void ARX_GLOBALMODS_Apply() {
 	}
 	
 	float fZclipp = config.video.fogDistance * 1.2f * (DEFAULT_ZCLIP - DEFAULT_MINZCLIP) / 10.f + DEFAULT_MINZCLIP;
+	#if ARX_HAVE_OPENXR
+	// The VR camera's wide field of view covering both eyes is not a zoom out
+	if(!xr::isActive())
+	#endif
 	fZclipp += (g_camera->focal - 310.f) * 5.f;
 	g_camera->cdepth = std::min(current.zclip, fZclipp);
 	

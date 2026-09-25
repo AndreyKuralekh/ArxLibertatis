@@ -32,6 +32,12 @@ long MagicFlareCountNonFlagged();
 void ARX_MAGICAL_FLARES_FirstInit();
 void ARX_MAGICAL_FLARES_KillAll();
 void MagicFlareChangeColor();
+/*!
+ * Distance from the camera at which the player's rune flares appear (default 75) and a factor
+ * for their size (default 1). VR places them at the drawing fingertip, close to the eyes.
+ */
+void setMagicFlarePlacement(float depth, float scale);
+
 void AddFlare(const Vec2f & pos, float sm, short typ, Entity * io = nullptr, bool bookDraw = false);
 void FlareLine(Vec2f pos0, Vec2f pos1, Entity * io = nullptr);
 void ARX_MAGICAL_FLARES_Update();

@@ -419,6 +419,10 @@ void ARX_INTERFACE_RenderCursor(bool flag) {
 				
 				pos += -size * 0.5f;
 				
+				#if ARX_HAVE_OPENXR
+				// In VR runes are drawn with the hand, the flares show where
+				if(!xr::isActive())
+				#endif
 				EERIEDrawBitmap(Rectf(pos, size.x, size.y), 0.f, surf, Color::white);
 			} else {
 				if(MAGICMODE) {

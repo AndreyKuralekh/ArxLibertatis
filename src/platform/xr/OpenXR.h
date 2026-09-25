@@ -147,6 +147,9 @@ bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position);
  * grip is pressed, the press is a grab (isGrabbing() until release) and does not act as Use.
  */
 void setGrabCandidate(bool available);
+
+//! Disable the UI pointer of the right controller, e.g. while it draws runes
+void setPointerEnabled(bool enabled);
 bool isGrabbing();
 
 //! Analog trigger and grip values from 0 to 1

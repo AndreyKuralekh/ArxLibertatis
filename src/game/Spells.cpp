@@ -129,6 +129,13 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
 #include "util/Cast.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#include "platform/xr/VRGameplay.h"
+#endif
+
 
 bool WILLRETURNTOFREELOOK = false;
 bool GLOBAL_MAGIC_MODE = true;
@@ -498,6 +505,13 @@ void ARX_SPELLS_ManageMagic() {
 				if(TRUE_PLAYER_MOUSELOOK_ON) {
 					pos = Vec2f(MemoMouse);
 				}
+				#if ARX_HAVE_OPENXR
+				Vec2s fingertip;
+				if(xr::isActive() && vr::getRuneScreenPoint(fingertip)) {
+					// In VR the flares follow the drawing hand
+					pos = Vec2f(fingertip);
+				}
+				#endif
 				
 				PlatformInstant now = g_platformTime.frameStart();
 				

@@ -30,6 +30,7 @@
 #include "core/Config.h"
 #include "core/GameTime.h"
 #include "game/Damage.h"
+#include "game/Camera.h"
 #include "game/EntityManager.h"
 #include "game/Equipment.h"
 #include "game/Inventory.h"
@@ -39,7 +40,9 @@
 #include "graphics/Renderer.h"
 #include "graphics/Vertex.h"
 #include "graphics/data/Mesh.h"
+#include "graphics/particle/MagicFlare.h"
 #include "graphics/particle/Spark.h"
+#include "input/Input.h"
 #include "io/log/Logger.h"
 #include "platform/xr/OpenXR.h"
 #include "physics/Collisions.h"
@@ -482,7 +485,96 @@ void releaseItem(Entity & item) {
 	}
 }
 
+/*
+ * Runes drawn with the fingertip
+ */
+
+struct RuneDrawing {
+	bool valid = false; //!< Drawing with the hand this frame
+	bool stroke = false; //!< The trigger is held
+	Vec3f origin = Vec3f(0.f); //!< Where the stroke started
+	Vec3f right = Vec3f(1.f, 0.f, 0.f); //!< Plane of the stroke, fixed when it starts
+	Vec3f down = Vec3f(0.f, 1.f, 0.f);
+	Vec2s recognitionPoint = Vec2s(0);
+	Vec2s screenPoint = Vec2s(0);
+};
+
+RuneDrawing g_rune;
+
+bool getFingertip(Vec3f & tip) {
+	
+	std::array<Vec3f, xr::HandJointCount> joints;
+	std::array<float, xr::HandJointCount> radii;
+	if(xr::getHandJoints(xr::RightHand, joints.data(), radii.data())) {
+		tip = joints[JointIndexMetacarpal + 4];
+		return true;
+	}
+	
+	// Without finger tracking: a point just in front of the controller
+	Vec3f position;
+	glm::mat3 orientation;
+	if(xr::getHandPose(xr::RightHand, false, position, orientation)) {
+		tip = position + orientation * Vec3f(0.f, 0.f, 0.05f * config.vr.worldScale);
+		return true;
+	}
+	
+	return false;
+}
+
 } // anonymous namespace
+
+void updateMagic() {
+	
+	bool magic = (player.doingmagic == 2);
+	xr::setPointerEnabled(!magic);
+	
+	g_rune.valid = false;
+	Vec3f tip;
+	if(!magic || !getFingertip(tip)) {
+		g_rune.stroke = false;
+		setMagicFlarePlacement(75.f, 1.f);
+		return;
+	}
+	
+	bool pressed = eeMousePressed1();
+	if(pressed && !g_rune.stroke) {
+		// Fix the drawing plane facing the head for the whole stroke
+		const glm::mat4x4 & worldToView = g_preparedCamera.m_worldToView;
+		g_rune.right = glm::normalize(Vec3f(worldToView[0][0], worldToView[1][0], worldToView[2][0]));
+		g_rune.down = glm::normalize(Vec3f(worldToView[0][1], worldToView[1][1], worldToView[2][1]));
+		g_rune.origin = tip;
+	}
+	g_rune.stroke = pressed;
+	
+	// About 1000 pixels per meter, around the middle of a 1280x720 screen
+	const float pixelsPerUnit = 1000.f / config.vr.worldScale;
+	Vec3f offset = tip - g_rune.origin;
+	Vec2f point = Vec2f(640.f, 360.f) + Vec2f(glm::dot(offset, g_rune.right), glm::dot(offset, g_rune.down)) * pixelsPerUnit;
+	point = glm::clamp(point, Vec2f(-30000.f), Vec2f(30000.f));
+	g_rune.recognitionPoint = Vec2s(point);
+	
+	// Magic flares appear at the fingertip
+	Vec4f clip = worldToClipSpace(tip);
+	if(clip.w <= 0.f) {
+		return;
+	}
+	Vec2f screen = glm::clamp(Vec2f(clip) / clip.w, Vec2f(-30000.f), Vec2f(30000.f));
+	g_rune.screenPoint = Vec2s(screen);
+	// Smaller than on the desktop: they are right in front of the eyes
+	setMagicFlarePlacement((g_preparedCamera.m_worldToView * Vec4f(tip, 1.f)).z, 0.35f);
+	
+	g_rune.valid = true;
+}
+
+bool getRuneRecognitionPoint(Vec2s & point) {
+	point = g_rune.recognitionPoint;
+	return g_rune.valid;
+}
+
+bool getRuneScreenPoint(Vec2s & point) {
+	point = g_rune.screenPoint;
+	return g_rune.valid;
+}
 
 void updateGrab() {
 	

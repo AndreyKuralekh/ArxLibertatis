@@ -1659,6 +1659,17 @@ void ArxGame::updateInput() {
 
 extern int iHighLight;
 
+//! Where the player draws runes: the mouse cursor, or in VR the hand
+static Vec2s getRuneDrawPoint() {
+	#if ARX_HAVE_OPENXR
+	Vec2s point;
+	if(xr::isActive() && vr::getRuneRecognitionPoint(point)) {
+		return point;
+	}
+	#endif
+	return DANAEMouse;
+}
+
 void ArxGame::updateLevel() {
 
 	arx_assert(entities.player());
@@ -1761,6 +1772,7 @@ void ArxGame::updateLevel() {
 	if(xr::isActive()) {
 		vr::updateCombat();
 		vr::updateGrab();
+		vr::updateMagic();
 	}
 	#endif
 	
@@ -1803,13 +1815,13 @@ void ArxGame::updateLevel() {
 					runeDrawPointElapsed += g_platformTime.lastFrameDuration();
 					
 					if(runeDrawPointElapsed >= runeDrawPointInterval) {
-						ARX_SPELLS_AddPoint(DANAEMouse);
+						ARX_SPELLS_AddPoint(getRuneDrawPoint());
 						while(runeDrawPointElapsed >= runeDrawPointInterval) {
 							runeDrawPointElapsed -= runeDrawPointInterval;
 						}
 					}
 				} else {
-					ARX_SPELLS_AddPoint(DANAEMouse);
+					ARX_SPELLS_AddPoint(getRuneDrawPoint());
 				}
 			} else {
 				spellRecognitionPointsReset();

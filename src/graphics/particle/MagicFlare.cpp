@@ -153,6 +153,15 @@ void MagicFlareChangeColor() {
 		g_magicFlareCurrentColor = 0;
 }
 
+//! Distance of the player's flares from the camera and their size, see setMagicFlarePlacement()
+static float g_magicFlareDepth = 75.f;
+static float g_magicFlareScale = 1.f;
+
+void setMagicFlarePlacement(float depth, float scale) {
+	g_magicFlareDepth = depth;
+	g_magicFlareScale = scale;
+}
+
 void AddFlare(const Vec2f & pos, float sm, short typ, Entity * io, bool bookDraw) {
 	
 	size_t oldest = 0;
@@ -195,7 +204,7 @@ void AddFlare(const Vec2f & pos, float sm, short typ, Entity * io, bool bookDraw
 			flare.p += angleToVectorXZ(io->angle.getYaw() + vx) * 100.f;
 			flare.p.y += std::sin(glm::radians(MAKEANGLE(io->angle.getPitch() + vy))) * 100.f - 150.f;
 		} else {
-			flare.p = screenToWorldSpace(pos, 75.f);
+			flare.p = screenToWorldSpace(pos, g_magicFlareDepth);
 		}
 	} else {
 		flare.p = Vec3f(flare.pos.x, flare.pos.y, 0.001f);
@@ -416,7 +425,8 @@ void ARX_MAGICAL_FLARES_Update() {
 				Vec3f pos = Vec3f(flare.p.x - size / 2.0f, flare.p.y - size / 2.0f, flare.p.z);
 				EERIEAddBitmap(mat, pos, size, size, surf, Color(color));
 			} else {
-				EERIEAddSprite(mat, flare.p, size * 0.025f + 1.f, Color(color), 2.f);
+				float scale = flare.io ? 1.f : g_magicFlareScale;
+				EERIEAddSprite(mat, flare.p, (size * 0.025f + 1.f) * scale, Color(color), 2.f);
 			}
 
 		}
