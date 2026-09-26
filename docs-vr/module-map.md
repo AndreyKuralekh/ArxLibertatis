@@ -254,3 +254,14 @@
 | Пути | `io/fs/SystemPaths.cpp`: user/config/data dirs, `getSearchPaths` (~254); лог `getUserDir()/arx.log` |
 | CMake | единый корневой `CMakeLists.txt`: опции (27–173) → добавить `option(ARX_VR … OFF)`; поиск зависимостей (~412–470) → `find_package(OpenXR)` (модули в `cmake/`); списки исходников `set(X_SOURCES …)` (~897–1255) → `PLATFORM_XR_SOURCES`; условные добавления (~1263–1396); `src/Configure.h.in` → `#cmakedefine01 ARX_HAVE_OPENXR`; `print_configuration("Features" …)` (~1987). Учитывать `UNITY_BUILD`: конфликты `static`-имён в новых файлах |
 | Меню настроек | `gui/MainMenu.cpp` (пример чекбокса: mouse look ~1430) |
+
+---
+
+## 11. VR-код форка (добавлено на этапах 1–2)
+
+| Что | Где |
+|---|---|
+| OpenXR: instance/session, swapchain'ы (глаза 2688×2880 + MSAA, UI 1280×720), цикл кадра, поза головы, перепроекция, recenter, лазер, виньетка, миниатюры, `--vr*` | `platform/xr/OpenXR.{h,cpp}` |
+| Действия контроллеров, позы рук, скелет пальцев | `platform/xr/XrInput.{h,cpp}` |
+| Кисти, оружие в руке, физический удар, хват предметов, руны пальцем, UI-батчер | `platform/xr/VRGameplay.{h,cpp}` |
+| Точки вставки в движок (под `ARX_HAVE_OPENXR`) | `core/ArxGame.cpp` (init, кадр, `updateActiveCamera`, `renderLevelStereo`), `window/SDL2Window.cpp` (`showFrame`), `graphics/opengl/OpenGLRenderer.*` (render target, перепроекция, снимки), `input/Input.cpp`, `gui/Interface.cpp` (ходьба), `gui/MainMenu.cpp` (страница VR), `gui/Cursor.cpp`, `game/Player.cpp`, `game/Spells.cpp`, `core/Core.cpp` (удары), `scene/Scene.cpp`, `graphics/Draw.cpp`, `graphics/GlobalFog.cpp`, `graphics/particle/*`, `core/Config.*` |
