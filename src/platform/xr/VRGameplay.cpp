@@ -28,6 +28,7 @@
 
 #include "animation/AnimationRender.h"
 #include "core/Config.h"
+#include "core/Core.h"
 #include "core/GameTime.h"
 #include "game/Damage.h"
 #include "game/Camera.h"
@@ -37,12 +38,14 @@
 #include "game/Item.h"
 #include "game/Player.h"
 #include "graphics/Draw.h"
+#include "graphics/Raycast.h"
 #include "graphics/RenderBatcher.h"
 #include "graphics/Renderer.h"
 #include "graphics/Vertex.h"
 #include "graphics/data/Mesh.h"
 #include "graphics/particle/MagicFlare.h"
 #include "graphics/particle/Spark.h"
+#include "gui/Interface.h"
 #include "input/Input.h"
 #include "io/log/Logger.h"
 #include "platform/xr/OpenXR.h"
@@ -729,6 +732,46 @@ void renderHands() {
 		PopAllTriangleListTransparency();
 	}
 	
+}
+
+void updatePointer() {
+	
+	// Only in cursor mode: free look and combat use the crosshair in the middle of the view
+	Vec3f origin, direction;
+	if(TRUE_PLAYER_MOUSELOOK_ON || (player.Interface & INTER_COMBATMODE) || BLOCK_PLAYER_CONTROLS
+	   || !xr::getWorldPointerRay(origin, direction)) {
+		return;
+	}
+	
+	// Walls and floor stop the ray, then the nearest entity model in front of them
+	const float reach = 1000.f;
+	Vec3f end = origin + direction * reach;
+	if(RaycastResult scene = raycastScene(origin, end)) {
+		end = scene.pos;
+	}
+	Vec3f point = end;
+	Entity * entity = nullptr;
+	if(EntityRaycastResult hit = raycastEntities(origin, end, POLY_TRANS, RaycastIgnorePlayer)) {
+		point = hit.pos;
+		entity = hit.entity;
+	}
+	
+	// The game picks what is under the cursor as projected by the camera, so place the cursor where
+	// the camera sees the hit point instead of where the ray crosses the UI panel
+	Vec4f clip = worldToClipSpace(point);
+	if(clip.w <= 0.f) {
+		return;
+	}
+	Vec2f screen = Vec2f(clip) / clip.w;
+	if(entity && entity->bbox2D.valid()) {
+		screen = glm::clamp(screen, entity->bbox2D.min, entity->bbox2D.max);
+	}
+	if(!Rectf(g_size).contains(screen)) {
+		return;
+	}
+	
+	bool target = entity && (entity->gameFlags & GFLAG_INTERACTIVITY);
+	xr::setWorldPointer(Vec2s(screen), glm::distance(origin, point), target);
 }
 
 } // namespace vr

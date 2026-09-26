@@ -79,6 +79,15 @@ bool getRuneScreenPoint(Vec2s & point);
  */
 void updateCombat();
 
+/*!
+ * Continue the controller pointer into the world when it misses the UI panel in cursor mode:
+ * the game cursor goes where the camera sees what the ray hits, so items can be combined with,
+ * given to or dropped onto things outside of the panel.
+ *
+ * Call once per frame after the camera was updated.
+ */
+void updatePointer();
+
 //! Batcher for 2D effects that must go to the UI panel instead of the eye views
 RenderBatcher & getUiBatcher();
 

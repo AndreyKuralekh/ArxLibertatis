@@ -175,8 +175,26 @@ float getHandSqueeze(int hand);
  * those from input/Mouse.h and input/Keyboard.h, actions are ControlAction values.
  */
 
-//! \return true if the controller points at the UI panel, with the position in panel pixels
+/*!
+ * \return true if the controller points at the UI panel, with the position in panel pixels,
+ *         or past it into the world (see setWorldPointer())
+ */
 bool getPointer(Vec2s & position);
+
+//! Pointing ray of the controller in world coordinates, if it points past the UI panel
+bool getWorldPointerRay(Vec3f & origin, Vec3f & direction);
+
+/*!
+ * Continue the pointer past the UI panel into the world for this frame.
+ *
+ * \param position Screen position (in panel pixels) of what the ray hits, for the game cursor
+ * \param distance Length of the ray to the hit in world units
+ * \param target   Whether the ray ends on something the player can interact with
+ */
+void setWorldPointer(const Vec2s & position, float distance, bool target);
+
+//! Whether the pointer currently points into the world instead of at the UI panel
+bool isPointerInWorld();
 
 bool isMouseButtonPressed(int button);
 

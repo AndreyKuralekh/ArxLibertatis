@@ -1773,6 +1773,7 @@ void ArxGame::updateLevel() {
 		vr::updateCombat();
 		vr::updateGrab();
 		vr::updateMagic();
+		vr::updatePointer();
 	}
 	#endif
 	

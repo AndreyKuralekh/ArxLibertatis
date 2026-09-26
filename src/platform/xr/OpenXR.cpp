@@ -163,6 +163,15 @@ static bool pointerValid = false;
 static Vec2s pointer(0);
 static Vec3f pointerOrigin(0.f); //!< Controller position in the local space
 static Vec3f pointerHit(0.f); //!< Where the pointer hits the UI panel in the local space
+static Vec3f pointerDirection(0.f); //!< Pointing direction of the controller in the local space
+static bool pointerAimValid = false; //!< The pointer is enabled and the controller is tracked
+static unsigned controlsFrame = 0;
+// The pointer continued into the world when it misses the UI panel
+static bool worldPointerSet = false;
+static unsigned worldPointerFrame = 0;
+static Vec2s worldPointer(0);
+static float worldPointerLength = 0.f; //!< In the local space (meters)
+static bool worldPointerTarget = false;
 
 // The UI panel turns lazily to stay in front of the head
 static float panelYaw = 0.f;
@@ -1221,8 +1230,17 @@ static void drawVignette() {
 //! Draw the pointing ray of the controller into the eye images, over everything else
 static void drawPointerBeam() {
 	
-	if(!state::pointerValid || !state::viewsValid) {
+	bool inWorld = isPointerInWorld();
+	if(!(state::pointerValid || inWorld) || !state::viewsValid) {
 		return;
+	}
+	
+	Vec3f end = state::pointerHit;
+	Color4f color(0.6f, 0.8f, 1.f, 0.9f);
+	if(inWorld) {
+		end = state::pointerOrigin + state::pointerDirection * state::worldPointerLength;
+		// Brighter and warmer on something to take, use or combine with, like the cursor hand
+		color = state::worldPointerTarget ? Color4f(1.f, 0.9f, 0.5f, 1.f) : Color4f(0.6f, 0.8f, 1.f, 0.5f);
 	}
 	
 	glPushAttrib(GL_ALL_ATTRIB_BITS);
@@ -1265,11 +1283,19 @@ static void drawPointerBeam() {
 		glMatrixMode(GL_MODELVIEW);
 		glLoadMatrixf(glm::value_ptr(viewMatrix));
 		glBegin(GL_LINES);
-		glColor4f(0.6f, 0.8f, 1.f, 0.2f);
+		glColor4f(color.r, color.g, color.b, 0.2f);
 		glVertex3f(state::pointerOrigin.x, state::pointerOrigin.y, state::pointerOrigin.z);
-		glColor4f(0.6f, 0.8f, 1.f, 0.9f);
-		glVertex3f(state::pointerHit.x, state::pointerHit.y, state::pointerHit.z);
+		glColor4f(color.r, color.g, color.b, color.a);
+		glVertex3f(end.x, end.y, end.z);
 		glEnd();
+		if(inWorld) {
+			// A dot where the ray hits, it is drawn over everything and would be hard to place otherwise
+			glPointSize(state::worldPointerTarget ? 12.f : 8.f);
+			glEnable(GL_POINT_SMOOTH);
+			glBegin(GL_POINTS);
+			glVertex3f(end.x, end.y, end.z);
+			glEnd();
+		}
 	}
 	
 	glMatrixMode(GL_MODELVIEW);
@@ -1308,9 +1334,12 @@ static void updateControls() {
 		controls.aim = controls.hands[input::LeftHand].aim;
 	}
 	
-	state::pointerValid = state::pointerEnabled && controls.aimValid
+	state::controlsFrame++;
+	state::pointerAimValid = state::pointerEnabled && controls.aimValid;
+	state::pointerValid = state::pointerAimValid
 	                      && intersectPanel(controls.aim, state::pointer, state::pointerHit);
 	state::pointerOrigin = toVec3(controls.aim.position);
+	state::pointerDirection = toMat3(controls.aim.orientation) * Vec3f(0.f, 0.f, -1.f);
 	
 	float seconds = float(state::frameState.predictedDisplayPeriod) * 1e-9f;
 	if(seconds <= 0.f || seconds > 0.1f) {
@@ -1382,9 +1411,43 @@ static void updateControls() {
 	state::vignette += (target - state::vignette) * std::min(seconds * 8.f, 1.f);
 	
 }
+bool isPointerInWorld() {
+	// Set by the game update of this or the previous frame (the game reads it before the update)
+	return !state::pointerValid && state::pointerAimValid && state::worldPointerSet
+	       && state::controlsFrame - state::worldPointerFrame <= 1;
+}
+
 bool getPointer(Vec2s & position) {
-	position = state::pointer;
-	return state::pointerValid;
+	if(state::pointerValid) {
+		position = state::pointer;
+		return true;
+	}
+	if(isPointerInWorld()) {
+		position = state::worldPointer;
+		return true;
+	}
+	return false;
+}
+
+bool getWorldPointerRay(Vec3f & origin, Vec3f & direction) {
+	
+	if(!state::worldValid || !state::pointerAimValid || state::pointerValid) {
+		return false;
+	}
+	
+	const XrPosef & aim = state::controls.aim;
+	origin = localToWorld(aim.position);
+	// The controller looks along its -z axis, which the flip in localToWorld() turns into +z
+	direction = glm::normalize(localToWorld(aim.orientation) * Vec3f(0.f, 0.f, 1.f));
+	return true;
+}
+
+void setWorldPointer(const Vec2s & position, float distance, bool target) {
+	state::worldPointerSet = true;
+	state::worldPointerFrame = state::controlsFrame;
+	state::worldPointer = position;
+	state::worldPointerLength = distance / getWorldScale();
+	state::worldPointerTarget = target;
 }
 
 bool isMouseButtonPressed(int button) {

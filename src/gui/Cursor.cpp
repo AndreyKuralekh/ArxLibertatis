@@ -284,6 +284,13 @@ void ARX_INTERFACE_RenderCursor(bool flag) {
 		iHighLight = 0;
 	}
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::isPointerInWorld()) {
+		// The cursor is not where the pointer crosses the UI panel, the ray shows the target instead
+		return;
+	}
+	#endif
+	
 	float iconScale = g_hudRoot.getScale();
 	float cursorScale = getInterfaceScale(config.interface.cursorScale, config.interface.cursorScaleInteger);
 	
