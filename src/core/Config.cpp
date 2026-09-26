@@ -141,7 +141,13 @@ constexpr const float
 	vrNearPlane = 5.f,
 	vrUiDistance = 1.5f,
 	vrUiWidth = 1.6f,
-	vrWorldScale = 100.f;
+	vrWorldScale = 100.f,
+	vrPlayerHeight = 170.f,
+	vrSmoothTurnSpeed = 120.f;
+constexpr const bool
+	vrLeftHanded = false,
+	vrSmoothTurn = false,
+	vrVignette = true;
 constexpr const std::string_view vrMirror = "left";
 #endif
 
@@ -354,6 +360,11 @@ constexpr const std::string_view
 	vrUiDistance = "ui_distance",
 	vrUiWidth = "ui_width",
 	vrWorldScale = "world_scale",
+	vrPlayerHeight = "player_height",
+	vrLeftHanded = "left_handed",
+	vrSmoothTurn = "smooth_turn",
+	vrSmoothTurnSpeed = "smooth_turn_speed",
+	vrVignette = "vignette",
 	vrMirror = "mirror";
 #endif
 
@@ -590,6 +601,11 @@ bool Config::save() {
 	writer.writeKey(Key::vrUiDistance, vr.uiDistance);
 	writer.writeKey(Key::vrUiWidth, vr.uiWidth);
 	writer.writeKey(Key::vrWorldScale, vr.worldScale);
+	writer.writeKey(Key::vrPlayerHeight, vr.playerHeight);
+	writer.writeKey(Key::vrLeftHanded, vr.leftHanded);
+	writer.writeKey(Key::vrSmoothTurn, vr.smoothTurn);
+	writer.writeKey(Key::vrSmoothTurnSpeed, vr.smoothTurnSpeed);
+	writer.writeKey(Key::vrVignette, vr.vignette);
 	writer.writeKey(Key::vrMirror, vr.mirror);
 	#endif
 	
@@ -736,6 +752,11 @@ bool Config::init(const fs::path & file) {
 	vr.uiDistance = glm::clamp(reader.getKey(Section::Vr, Key::vrUiDistance, Default::vrUiDistance), 0.3f, 10.f);
 	vr.uiWidth = glm::clamp(reader.getKey(Section::Vr, Key::vrUiWidth, Default::vrUiWidth), 0.2f, 10.f);
 	vr.worldScale = glm::clamp(reader.getKey(Section::Vr, Key::vrWorldScale, Default::vrWorldScale), 10.f, 1000.f);
+	vr.playerHeight = glm::clamp(reader.getKey(Section::Vr, Key::vrPlayerHeight, Default::vrPlayerHeight), 100.f, 230.f);
+	vr.leftHanded = reader.getKey(Section::Vr, Key::vrLeftHanded, Default::vrLeftHanded);
+	vr.smoothTurn = reader.getKey(Section::Vr, Key::vrSmoothTurn, Default::vrSmoothTurn);
+	vr.smoothTurnSpeed = glm::clamp(reader.getKey(Section::Vr, Key::vrSmoothTurnSpeed, Default::vrSmoothTurnSpeed), 30.f, 360.f);
+	vr.vignette = reader.getKey(Section::Vr, Key::vrVignette, Default::vrVignette);
 	vr.mirror = reader.getKey(Section::Vr, Key::vrMirror, Default::vrMirror);
 	#endif
 	

@@ -121,6 +121,16 @@ void recenter();
 constexpr int LeftHand = 0;
 constexpr int RightHand = 1;
 
+//! The hand that points, attacks, draws runes and takes items (the right one unless left-handed)
+int getPrimaryHand();
+int getOffHand();
+
+//! World units per meter of real motion, depending on the player's height
+float getWorldScale();
+
+//! Walking thumbstick (x right, y forward) with dead zone, if deflected
+bool getMoveStick(Vec2f & stick);
+
 //! Number of hand joints, in the order of XrHandJointEXT (palm, wrist, thumb, index, middle, ring, little)
 constexpr size_t HandJointCount = 26;
 

@@ -80,6 +80,12 @@
 
 #include "window/RenderWindow.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 
 class NewQuestMenuPage final : public MenuPage {
 	
@@ -496,6 +502,14 @@ public:
 			txt->setTargetPage(Page_OptionsInput);
 			addCenter(std::move(txt));
 		}
+		
+		#if ARX_HAVE_OPENXR
+		if(xr::isActive()) {
+			auto txt = std::make_unique<TextWidget>(hFontMenu, getLocalised("system_menus_options_vr"));
+			txt->setTargetPage(Page_OptionsVR);
+			addCenter(std::move(txt));
+		}
+		#endif
 		
 		addBackButton(Page_None);
 		
@@ -1786,6 +1800,110 @@ public:
 	
 };
 
+#if ARX_HAVE_OPENXR
+class VROptionsMenuPage final : public MenuPage {
+
+public:
+	
+	VROptionsMenuPage()
+		: MenuPage(Page_OptionsVR)
+	{ }
+	
+	void init() override {
+		
+		reserveBottom();
+		
+		{
+			// 150 to 200 cm in steps of 5 cm
+			std::string_view label = getLocalised("system_menus_options_vr_height");
+			auto cb = std::make_unique<CycleTextWidget>(sliderSize(), hFontMenu, label);
+			cb->valueChanged = [](int pos, std::string_view /* string */) noexcept {
+				config.vr.playerHeight = 150.f + 5.f * float(pos);
+			};
+			for(int height = 150; height <= 200; height += 5) {
+				cb->addEntry(std::to_string(height) + " cm");
+			}
+			cb->setValue(glm::clamp(int((config.vr.playerHeight - 150.f) / 5.f + 0.5f), 0, 10));
+			addCenter(std::move(cb));
+		}
+		
+		{
+			std::string_view label = getLocalised("system_menus_options_vr_hand");
+			auto cb = std::make_unique<CycleTextWidget>(sliderSize(), hFontMenu, label);
+			cb->valueChanged = [](int pos, std::string_view /* string */) noexcept {
+				config.vr.leftHanded = (pos == 1);
+			};
+			cb->addEntry(getLocalised("system_menus_options_vr_hand_right"));
+			cb->addEntry(getLocalised("system_menus_options_vr_hand_left"));
+			cb->setValue(config.vr.leftHanded ? 1 : 0);
+			addCenter(std::move(cb));
+		}
+		
+		{
+			std::string_view label = getLocalised("system_menus_options_vr_turn");
+			auto cb = std::make_unique<CycleTextWidget>(sliderSize(), hFontMenu, label);
+			cb->valueChanged = [](int pos, std::string_view /* string */) noexcept {
+				config.vr.smoothTurn = (pos == 1);
+			};
+			cb->addEntry(getLocalised("system_menus_options_vr_turn_snap"));
+			cb->addEntry(getLocalised("system_menus_options_vr_turn_smooth"));
+			cb->setValue(config.vr.smoothTurn ? 1 : 0);
+			addCenter(std::move(cb));
+		}
+		
+		{
+			static const int angles[] = { 15, 30, 45, 60, 90 };
+			std::string_view label = getLocalised("system_menus_options_vr_snap_angle");
+			auto cb = std::make_unique<CycleTextWidget>(sliderSize(), hFontMenu, label);
+			cb->valueChanged = [](int pos, std::string_view /* string */) noexcept {
+				config.vr.snapTurnAngle = float(angles[glm::clamp(pos, 0, 4)]);
+			};
+			int selected = 2;
+			for(int i = 0; i < 5; i++) {
+				cb->addEntry(std::to_string(angles[i]) + "\xC2\xB0");
+				if(std::abs(float(angles[i]) - config.vr.snapTurnAngle) < 1.f) {
+					selected = i;
+				}
+			}
+			cb->setValue(selected);
+			addCenter(std::move(cb));
+		}
+		
+		{
+			static const int speeds[] = { 60, 90, 120, 180, 240 };
+			std::string_view label = getLocalised("system_menus_options_vr_turn_speed");
+			auto cb = std::make_unique<CycleTextWidget>(sliderSize(), hFontMenu, label);
+			cb->valueChanged = [](int pos, std::string_view /* string */) noexcept {
+				config.vr.smoothTurnSpeed = float(speeds[glm::clamp(pos, 0, 4)]);
+			};
+			int selected = 2;
+			for(int i = 0; i < 5; i++) {
+				cb->addEntry(std::to_string(speeds[i]) + "\xC2\xB0/s");
+				if(std::abs(float(speeds[i]) - config.vr.smoothTurnSpeed) < 1.f) {
+					selected = i;
+				}
+			}
+			cb->setValue(selected);
+			addCenter(std::move(cb));
+		}
+		
+		{
+			std::string_view label = getLocalised("system_menus_options_vr_vignette");
+			auto cb = std::make_unique<CheckboxWidget>(checkboxSize(), hFontMenu, label);
+			cb->setChecked(config.vr.vignette);
+			cb->stateChanged = [](bool checked) noexcept {
+				config.vr.vignette = checked;
+			};
+			addCenter(std::move(cb));
+		}
+		
+		addBackButton(Page_Options);
+		
+	}
+	
+};
+#endif
+
 void MainMenu::initWindowPages() {
 	
 	m_window.reset();
@@ -1810,6 +1928,10 @@ void MainMenu::initWindowPages() {
 	
 	m_window->add(std::make_unique<QuitConfirmMenuPage>());
 	m_window->add(std::make_unique<LocalizationMenuPage>());
+	
+	#if ARX_HAVE_OPENXR
+	m_window->add(std::make_unique<VROptionsMenuPage>());
+	#endif
 	
 }
 

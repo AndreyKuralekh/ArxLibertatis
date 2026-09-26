@@ -133,6 +133,9 @@ static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (deg
 static bool grabCandidate = false; //!< Something is within reach of the right hand
 static bool grabbing = false; //!< The current right grip press is a grab
 static bool pointerEnabled = true;
+static Vec2f moveStick(0.f); //!< Walking thumbstick with dead zone
+static float vignette = 0.f; //!< Current strength of the comfort vignette
+static float vignettePulse = 0.f; //!< Short vignette after a snap turn
 
 // Controller input mapped to the game
 static input::Controls controls;
@@ -197,6 +200,24 @@ bool isDebug() {
 Vec2i getUiSize() {
 	// Independent of the window, which the desktop may resize or maximize
 	return Vec2i(1280, 720);
+}
+
+float getWorldScale() {
+	// The character is 170 cm tall: a taller player sees the world a bit smaller
+	return config.vr.worldScale * 170.f / config.vr.playerHeight;
+}
+
+int getPrimaryHand() {
+	return config.vr.leftHanded ? LeftHand : RightHand;
+}
+
+int getOffHand() {
+	return config.vr.leftHanded ? RightHand : LeftHand;
+}
+
+bool getMoveStick(Vec2f & stick) {
+	stick = state::moveStick;
+	return stick != Vec2f(0.f);
 }
 
 bool isActive() {
@@ -707,7 +728,7 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 	glm::mat3 body = glm::transpose(glm::mat3(toRotationMatrix(Anglef(0.f, yaw, 0.f))));
 	
 	auto toWorldPosition = [&](const XrVector3f & position) {
-		return base.m_pos + body * (flipYZ * (unyaw * (toVec3(position) - origin)) * config.vr.worldScale);
+		return base.m_pos + body * (flipYZ * (unyaw * (toVec3(position) - origin)) * getWorldScale());
 	};
 	auto toWorldToView = [&](const XrQuaternionf & orientation) {
 		glm::mat3 viewToWorld = body * flipYZ * unyaw * toMat3(orientation) * flipYZ;
@@ -753,7 +774,7 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 	glm::dmat3 cameraRotation = glm::dmat3(glm::mat3(toRotationMatrix(state::camera.angle)));
 	for(size_t i = 0; i < EyeCount; i++) {
 		glm::dmat3 eyeRotation = glm::dmat3(glm::mat3(state::eyeWorldToView[i]));
-		Vec3f offset = body * (flipYZ * (unyaw * (head - toVec3(state::views[i].pose.position))) * config.vr.worldScale);
+		Vec3f offset = body * (flipYZ * (unyaw * (head - toVec3(state::views[i].pose.position))) * getWorldScale());
 		glm::dmat4 matrix = glm::dmat4(eyeRotation * glm::transpose(cameraRotation));
 		matrix[3] = glm::dvec4(eyeRotation * glm::dvec3(offset), 1.0);
 		state::eyeFromCamera[i] = matrix;
@@ -770,7 +791,7 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 
 static Vec3f localToWorld(const XrVector3f & position) {
 	return state::worldOrigin + state::worldBody * (flipYZ * (state::worldUnyaw * (toVec3(position) - state::worldTrackingOrigin))
-	                                                * config.vr.worldScale);
+	                                                * getWorldScale());
 }
 
 static glm::mat3 localToWorld(const XrQuaternionf & orientation) {
@@ -807,7 +828,7 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii) {
 	
 	for(size_t i = 0; i < state.joints.size(); i++) {
 		positions[i] = localToWorld(state.joints[i].pose.position);
-		radii[i] = state.joints[i].radius * config.vr.worldScale;
+		radii[i] = state.joints[i].radius * getWorldScale();
 	}
 	return true;
 }
@@ -835,7 +856,7 @@ bool getHandPointInTracking(int hand, const Vec3f & offset, Vec3f & position) {
 		return false;
 	}
 	
-	position = toVec3(state.grip.position) + toMat3(state.grip.orientation) * (flipYZ * (offset / config.vr.worldScale));
+	position = toVec3(state.grip.position) + toMat3(state.grip.orientation) * (flipYZ * (offset / getWorldScale()));
 	return true;
 }
 
@@ -964,6 +985,85 @@ static glm::mat4 createLocalProjection(const XrFovf & fov, float nearDist, float
 	return projection;
 }
 
+//! Darken the borders of the eye images during artificial motion, over everything else
+static void drawVignette() {
+	
+	if(state::vignette < 0.01f || !state::viewsValid) {
+		return;
+	}
+	
+	glPushAttrib(GL_ALL_ATTRIB_BITS);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+	
+	GLint textureUnits = 1;
+	glGetIntegerv(GL_MAX_TEXTURE_UNITS, &textureUnits);
+	for(GLint i = 0; i < textureUnits; i++) {
+		glActiveTexture(GLenum(GL_TEXTURE0 + i));
+		glDisable(GL_TEXTURE_2D);
+	}
+	glActiveTexture(GL_TEXTURE0);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_FOG);
+	glDisable(GL_ALPHA_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_SCISSOR_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	
+	// Clear center radius in normalized device coordinates, shrinking with the strength
+	float inner = glm::mix(1.3f, 0.45f, state::vignette);
+	float outer = inner + 0.45f;
+	const int segments = 48;
+	
+	for(size_t i = 0; i < EyeCount; i++) {
+		const Swapchain & eye = state::eyes[i];
+		if(!eye.acquired || !eye.rendered) {
+			continue;
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, eye.framebuffers[eye.current]);
+		glViewport(0, 0, eye.size.x, eye.size.y);
+		
+		// Center of the view direction in this eye's asymmetric projection
+		const XrFovf & fov = state::views[i].fov;
+		float left = std::tan(fov.angleLeft), right = std::tan(fov.angleRight);
+		float up = std::tan(fov.angleUp), down = std::tan(fov.angleDown);
+		Vec2f center(-(right + left) / (right - left), -(up + down) / (up - down));
+		
+		glBegin(GL_TRIANGLE_STRIP);
+		for(int s = 0; s <= segments; s++) {
+			float angle = 2.f * glm::pi<float>() * float(s) / float(segments);
+			Vec2f direction(std::cos(angle), std::sin(angle));
+			glColor4f(0.f, 0.f, 0.f, 0.f);
+			glVertex2f(center.x + direction.x * inner, center.y + direction.y * inner);
+			glColor4f(0.f, 0.f, 0.f, 1.f);
+			glVertex2f(center.x + direction.x * outer, center.y + direction.y * outer);
+		}
+		glEnd();
+		glBegin(GL_TRIANGLE_STRIP);
+		for(int s = 0; s <= segments; s++) {
+			float angle = 2.f * glm::pi<float>() * float(s) / float(segments);
+			Vec2f direction(std::cos(angle), std::sin(angle));
+			glColor4f(0.f, 0.f, 0.f, 1.f);
+			glVertex2f(center.x + direction.x * outer, center.y + direction.y * outer);
+			glVertex2f(center.x + direction.x * 4.f, center.y + direction.y * 4.f);
+		}
+		glEnd();
+	}
+	
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glPopAttrib();
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	
+}
+
 //! Draw the pointing ray of the controller into the eye images, over everything else
 static void drawPointerBeam() {
 	
@@ -1027,24 +1127,58 @@ static void drawPointerBeam() {
 	
 }
 
+//! Thumbstick value with a radial dead zone, rescaled to reach full deflection
+static Vec2f applyDeadZone(const XrVector2f & stick, float deadZone) {
+	Vec2f value(stick.x, stick.y);
+	float length = glm::length(value);
+	if(length <= deadZone) {
+		return Vec2f(0.f);
+	}
+	return value * (std::min((length - deadZone) / (1.f - deadZone), 1.f) / length);
+}
+
 //! Map the controller state of this frame to mouse, key and action state for the game
 static void updateControls() {
 	
 	const input::Controls previous = state::controls;
 	state::controls = input::getControls();
-	const input::Controls & controls = state::controls;
+	input::Controls & controls = state::controls;
+	
+	if(config.vr.leftHanded) {
+		// The left hand points, draws, attacks and uses; the right hand moves, casts and draws the weapon
+		std::swap(controls.select, controls.weapon);
+		std::swap(controls.use, controls.magic);
+		std::swap(controls.move, controls.turn);
+		std::swap(controls.recenter, controls.freelook);
+		controls.aimValid = controls.hands[input::LeftHand].aimValid;
+		controls.aim = controls.hands[input::LeftHand].aim;
+	}
 	
 	state::pointerValid = state::pointerEnabled && controls.aimValid
 	                      && intersectPanel(controls.aim, state::pointer, state::pointerHit);
 	state::pointerOrigin = toVec3(controls.aim.position);
 	
-	// Thumbstick flicks: snap turns and mouse wheel steps
+	float seconds = float(state::frameState.predictedDisplayPeriod) * 1e-9f;
+	if(seconds <= 0.f || seconds > 0.1f) {
+		seconds = 1.f / 90.f;
+	}
+	
+	// Turning: continuous or in steps (thumbstick flicks)
 	const float flick = 0.7f;
-	if(controls.turn.x > flick && previous.turn.x <= flick) {
+	Vec2f turn = applyDeadZone(controls.turn, 0.2f);
+	float vignette = 0.f;
+	if(config.vr.smoothTurn) {
+		state::pendingTurn -= turn.x * config.vr.smoothTurnSpeed * seconds;
+		vignette = std::abs(turn.x);
+	} else if(controls.turn.x > flick && previous.turn.x <= flick) {
 		state::pendingTurn -= config.vr.snapTurnAngle;
+		state::vignettePulse = 1.f;
 	} else if(controls.turn.x < -flick && previous.turn.x >= -flick) {
 		state::pendingTurn += config.vr.snapTurnAngle;
+		state::vignettePulse = 1.f;
 	}
+	
+	// Mouse wheel steps
 	state::wheel = 0;
 	if(controls.turn.y > flick && previous.turn.y <= flick) {
 		state::wheel = 1;
@@ -1056,13 +1190,17 @@ static void updateControls() {
 		recenter();
 	}
 	
-	const float deadzone = 0.5f;
+	// Walking: the direction flags drive the walk animations, the analog vector the speed
+	state::moveStick = applyDeadZone(controls.move, 0.15f);
+	vignette = std::max(vignette, glm::length(state::moveStick));
+	const float threshold = 0.2f;
 	state::previousActions = state::actions;
 	state::actions.fill(false);
-	state::actions[CONTROLS_CUST_WALKFORWARD] = controls.move.y > deadzone;
-	state::actions[CONTROLS_CUST_WALKBACKWARD] = controls.move.y < -deadzone;
-	state::actions[CONTROLS_CUST_STRAFELEFT] = controls.move.x < -deadzone;
-	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > deadzone;
+	state::actions[CONTROLS_CUST_WALKFORWARD] = controls.move.y > threshold;
+	state::actions[CONTROLS_CUST_WALKBACKWARD] = controls.move.y < -threshold;
+	state::actions[CONTROLS_CUST_STRAFELEFT] = controls.move.x < -threshold;
+	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > threshold;
+	
 	// Take / use / open what the crosshair points at (the right mouse button toggles free look),
 	// unless the grip grabs something within reach of the hand
 	if(controls.use && !previous.use) {
@@ -1080,8 +1218,12 @@ static void updateControls() {
 	state::actions[CONTROLS_CUST_MAGICMODE] = controls.magic;
 	state::actions[CONTROLS_CUST_WEAPON] = controls.weapon;
 	
+	// Comfort vignette: follows the artificial motion, fades in and out over a few frames
+	state::vignettePulse = std::max(state::vignettePulse - seconds * 4.f, 0.f);
+	float target = config.vr.vignette ? std::max(vignette, state::vignettePulse) : 0.f;
+	state::vignette += (target - state::vignette) * std::min(seconds * 8.f, 1.f);
+	
 }
-
 bool getPointer(Vec2s & position) {
 	position = state::pointer;
 	return state::pointerValid;
@@ -1300,6 +1442,7 @@ void endFrame() {
 	bool uiReady = state::ui.acquired;
 	if(state::frameState.shouldRender) {
 		clearUnusedEyes();
+		drawVignette();
 		drawPointerBeam();
 		mirrorToWindow();
 		dumpFrame();

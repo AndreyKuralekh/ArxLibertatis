@@ -94,7 +94,7 @@ bool createSyntheticHand(int hand, HandSkeleton & skeleton) {
 	
 	// Hand space in meters: x right, y down, z forward; the thumb is on the inner side
 	const float side = (hand == xr::RightHand) ? 1.f : -1.f;
-	const float scale = config.vr.worldScale;
+	const float scale = xr::getWorldScale();
 	auto place = [&](Vec3f local) {
 		return position + orientation * (local * scale);
 	};
@@ -266,7 +266,7 @@ void updateWeaponGrip() {
 	
 	Vec3f position;
 	glm::mat3 orientation;
-	if(!xr::getHandPose(xr::RightHand, true, position, orientation)) {
+	if(!xr::getHandPose(xr::getPrimaryHand(), true, position, orientation)) {
 		return;
 	}
 	
@@ -322,7 +322,7 @@ float swingStrength(float speed) {
 
 void swingWeapon(float seconds) {
 	
-	Swing & swing = g_swings[xr::RightHand];
+	Swing & swing = g_swings[size_t(xr::getPrimaryHand())];
 	Entity * io = entities.player();
 	Entity * weapon = g_weaponGrip.weapon;
 	
@@ -330,7 +330,7 @@ void swingWeapon(float seconds) {
 	DrawEERIEInter_ModelTransform(weapon->obj, g_weaponGrip.transform);
 	
 	Vec3f tip(0.f, 0.f, g_weaponGrip.length * weapon->scale);
-	float speed = measureSpeed(swing, xr::RightHand, tip, seconds);
+	float speed = measureSpeed(swing, xr::getPrimaryHand(), tip, seconds);
 	
 	if(!swing.active && speed > SwingStartSpeed) {
 		swing.active = true;
@@ -505,7 +505,7 @@ bool getFingertip(Vec3f & tip) {
 	
 	std::array<Vec3f, xr::HandJointCount> joints;
 	std::array<float, xr::HandJointCount> radii;
-	if(xr::getHandJoints(xr::RightHand, joints.data(), radii.data())) {
+	if(xr::getHandJoints(xr::getPrimaryHand(), joints.data(), radii.data())) {
 		tip = joints[JointIndexMetacarpal + 4];
 		return true;
 	}
@@ -513,8 +513,8 @@ bool getFingertip(Vec3f & tip) {
 	// Without finger tracking: a point just in front of the controller
 	Vec3f position;
 	glm::mat3 orientation;
-	if(xr::getHandPose(xr::RightHand, false, position, orientation)) {
-		tip = position + orientation * Vec3f(0.f, 0.f, 0.05f * config.vr.worldScale);
+	if(xr::getHandPose(xr::getPrimaryHand(), false, position, orientation)) {
+		tip = position + orientation * Vec3f(0.f, 0.f, 0.05f * xr::getWorldScale());
 		return true;
 	}
 	
@@ -547,7 +547,7 @@ void updateMagic() {
 	g_rune.stroke = pressed;
 	
 	// About 1000 pixels per meter, around the middle of a 1280x720 screen
-	const float pixelsPerUnit = 1000.f / config.vr.worldScale;
+	const float pixelsPerUnit = 1000.f / xr::getWorldScale();
 	Vec3f offset = tip - g_rune.origin;
 	Vec2f point = Vec2f(640.f, 360.f) + Vec2f(glm::dot(offset, g_rune.right), glm::dot(offset, g_rune.down)) * pixelsPerUnit;
 	point = glm::clamp(point, Vec2f(-30000.f), Vec2f(30000.f));
@@ -580,7 +580,7 @@ void updateGrab() {
 	
 	Vec3f hand;
 	glm::mat3 orientation;
-	bool valid = entities.player() && xr::getHandPose(xr::RightHand, true, hand, orientation)
+	bool valid = entities.player() && xr::getHandPose(xr::getPrimaryHand(), true, hand, orientation)
 	             && !g_weaponGrip.valid && !BLOCK_PLAYER_CONTROLS;
 	
 	float seconds = toMsf(g_platformTime.lastFrameDuration()) / 1000.f;
@@ -635,7 +635,7 @@ void updateCombat() {
 		punch(xr::LeftHand, seconds);
 		punch(xr::RightHand, seconds);
 	} else if(g_weaponGrip.valid) {
-		g_swings[xr::LeftHand] = Swing();
+		g_swings[size_t(xr::getOffHand())] = Swing();
 		swingWeapon(seconds);
 	}
 	

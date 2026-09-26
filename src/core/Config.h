@@ -255,7 +255,12 @@ public:
 		float nearPlane; //!< Near clip distance for the eye views in world units
 		float uiDistance; //!< Distance of the UI panel in meters
 		float uiWidth; //!< Width of the UI panel in meters
-		float worldScale; //!< World units per meter
+		float worldScale; //!< World units per meter for a player as tall as the character (170 cm)
+		float playerHeight; //!< Real height of the player in cm, scales the world so that eye heights match
+		bool leftHanded; //!< Swap the roles of the hands
+		bool smoothTurn; //!< Turn continuously with the thumbstick instead of in steps
+		float smoothTurnSpeed; //!< Degrees per second at full thumbstick deflection
+		bool vignette; //!< Darken the view borders during artificial movement
 		
 		std::string mirror; //!< What to show in the desktop window: "left", "ui" or "none"
 		

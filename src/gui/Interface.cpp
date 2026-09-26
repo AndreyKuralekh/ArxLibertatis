@@ -134,6 +134,12 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
 #include "window/RenderWindow.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 
 extern AnimationDuration PLAYER_ROTATION;
 extern float SLID_VALUE;
@@ -882,6 +888,16 @@ void ArxGame::managePlayerControls() {
 		} else if(MOVE_PRECEDENCE == PLAYER_MOVE_STRAFE_RIGHT) {
 			MOVE_PRECEDENCE = 0;
 		}
+		
+		#if ARX_HAVE_OPENXR
+		Vec2f stick;
+		if(xr::isActive() && !NOMOREMOVES && xr::getMoveStick(stick)) {
+			// VR thumbstick: exact direction, speed from the deflection (the flags above select the animations)
+			float forward = stick.y * ((stick.y >= 0.f) ? 10.f : 5.f) * FD * MoveDiv;
+			float sideways = stick.x * 6.f * FD * MoveDiv;
+			tm = angleToVectorXZ(player.angle.getYaw()) * forward + angleToVectorXZ(player.angle.getYaw() - 90.f) * sideways;
+		}
+		#endif
 		
 		g_moveto = player.pos + tm;
 	}
