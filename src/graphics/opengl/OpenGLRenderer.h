@@ -105,6 +105,12 @@ public:
 	Vec2i getRenderTargetSize() const;
 	
 	/*!
+	 * Take snapshots (e.g. savegame thumbnails) from this framebuffer object instead of the current
+	 * render target, or from the render target again if framebuffer is 0.
+	 */
+	void setSnapshotSource(GLuint framebuffer, Vec2i size);
+	
+	/*!
 	 * Transform pre-transformed vertices (TexturedVertex) with a matrix instead of mapping
 	 * them from viewport pixels to normalized device coordinates.
 	 *
@@ -174,6 +180,8 @@ private:
 	
 	GLuint m_framebuffer;
 	Vec2i m_framebufferSize;
+	GLuint m_snapshotFramebuffer;
+	Vec2i m_snapshotSize;
 	
 	int m_MSAALevel;
 	bool m_hasMSAA;

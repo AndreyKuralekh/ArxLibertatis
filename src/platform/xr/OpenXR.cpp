@@ -101,6 +101,11 @@ static std::array<XrViewConfigurationView, 2> viewConfigs;
 static std::array<Swapchain, 2> eyes;
 static Swapchain ui;
 
+// Copy of the left eye view for savegame thumbnails
+static GLuint thumbnailFramebuffer = 0;
+static GLuint thumbnailTexture = 0;
+static Vec2i thumbnailSize(0);
+
 static bool frameBegun = false;
 static XrFrameState frameState = { XR_TYPE_FRAME_STATE };
 static std::array<XrView, 2> views;
@@ -573,6 +578,57 @@ static void resolveEyes() {
 		glEnable(GL_SCISSOR_TEST);
 	}
 	
+}
+
+//! Keep a small copy of the left eye view for savegame thumbnails (the UI panel has no world)
+static void updateThumbnail() {
+	
+	const Swapchain & eye = state::eyes[0];
+	if(!eye.acquired || !eye.rendered) {
+		return;
+	}
+	
+	if(!state::thumbnailFramebuffer) {
+		// windows.h defines interface as a macro
+		#pragma push_macro("interface")
+		#undef interface
+		state::thumbnailSize = glm::max(config.interface.thumbnailSize, Vec2i(16));
+		#pragma pop_macro("interface")
+		GLint oldTexture = 0;
+		glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture);
+		glGenTextures(1, &state::thumbnailTexture);
+		glBindTexture(GL_TEXTURE_2D, state::thumbnailTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, state::thumbnailSize.x, state::thumbnailSize.y, 0, GL_RGBA,
+		             GL_UNSIGNED_BYTE, nullptr);
+		glBindTexture(GL_TEXTURE_2D, GLuint(oldTexture));
+		glGenFramebuffers(1, &state::thumbnailFramebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, state::thumbnailFramebuffer);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state::thumbnailTexture, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	}
+	
+	// The middle of the view with the thumbnail's aspect ratio
+	Vec2i source = eye.size;
+	float aspect = float(state::thumbnailSize.x) / float(state::thumbnailSize.y);
+	if(float(source.x) / float(source.y) > aspect) {
+		source.x = int(float(source.y) * aspect);
+	} else {
+		source.y = int(float(source.x) / aspect);
+	}
+	Vec2i offset((eye.size.x - source.x) / 2, (eye.size.y - source.y) / 2);
+	
+	GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, eye.framebuffers[eye.current]);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, state::thumbnailFramebuffer);
+	glBlitFramebuffer(offset.x, offset.y, offset.x + source.x, offset.y + source.y,
+	                  0, 0, state::thumbnailSize.x, state::thumbnailSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	if(scissor) {
+		glEnable(GL_SCISSOR_TEST);
+	}
+	
+	renderer()->setSnapshotSource(state::thumbnailFramebuffer, state::thumbnailSize);
 }
 
 static bool createSwapchains() {
@@ -1300,7 +1356,8 @@ static void updateControls() {
 	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > threshold;
 	// Partial deflection walks (stealth), full deflection runs
 	float deflection = glm::length(state::moveStick);
-	state::actions[CONTROLS_CUST_STEALTHMODE] = deflection > 0.f && deflection < RunDeflection;
+	// (not in magic mode: holding stealth there turns runes into a precast spell)
+	state::actions[CONTROLS_CUST_STEALTHMODE] = deflection > 0.f && deflection < RunDeflection && !controls.magic;
 	
 	// Take / use / open what the crosshair points at (the right mouse button toggles free look),
 	// unless the grip grabs something within reach of the hand
@@ -1574,6 +1631,7 @@ void endFrame() {
 	bool uiReady = state::ui.acquired;
 	if(state::frameState.shouldRender) {
 		resolveEyes();
+		updateThumbnail();
 		clearUnusedEyes();
 		drawVignette();
 		drawPointerBeam();
@@ -1683,6 +1741,14 @@ void shutdown() {
 			state::localSpace = XR_NULL_HANDLE;
 		}
 		input::destroy();
+		if(state::thumbnailFramebuffer) {
+			if(GRenderer) {
+				renderer()->setSnapshotSource(0, Vec2i(0));
+			}
+			glDeleteFramebuffers(1, &state::thumbnailFramebuffer);
+			glDeleteTextures(1, &state::thumbnailTexture);
+			state::thumbnailFramebuffer = state::thumbnailTexture = 0;
+		}
 		xrDestroySession(state::session);
 		state::session = XR_NULL_HANDLE;
 	}

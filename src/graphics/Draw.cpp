@@ -52,6 +52,12 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "graphics/data/TextureContainer.h"
 #include "graphics/data/Mesh.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 CircularVertexBuffer<TexturedVertex> * pDynamicVertexBuffer_TLVERTEX;
 
 void EERIEDRAWPRIM(Renderer::Primitive primitive, const TexturedVertex * vertices, size_t count, bool nocount) {
@@ -94,7 +100,13 @@ static bool EERIECreateSprite(TexturedQuad & sprite, const Vec3f & in, float siz
 		return false;
 	}
 	
+	// Fake depth right in front of the camera to draw over nearby geometry. In VR the eyes
+	// re-project the sprite and the fake depth would put it a centimeter in front of the eyes.
+	#if ARX_HAVE_OPENXR
+	if(Zpos <= 1.f && !xr::isActive()) {
+	#else
 	if(Zpos <= 1.f) {
+	#endif
 		p.z = Zpos;
 		out.w = 1.f / (1.f - Zpos);
 	}
@@ -155,9 +167,14 @@ static void CreateBitmap(TexturedQuad & s, Rectf rect, float z, TextureContainer
 }
 
 void EERIEAddBitmap(const RenderMaterial & mat, const Vec3f & p, float sx, float sy, TextureContainer * tex, Color color) {
+	EERIEAddBitmap(g_renderBatcher, mat, p, sx, sy, tex, color);
+}
+
+void EERIEAddBitmap(RenderBatcher & batcher, const RenderMaterial & mat, const Vec3f & p, float sx, float sy,
+                    TextureContainer * tex, Color color) {
 	TexturedQuad s;
 	CreateBitmap(s, Rectf(Vec2f(p.x, p.y), sx, sy), p.z, tex, color);
-	g_renderBatcher.add(mat, s);
+	batcher.add(mat, s);
 }
 
 void EERIEDrawBitmap(const Rectf & rect, float z, TextureContainer * tex, Color color) {

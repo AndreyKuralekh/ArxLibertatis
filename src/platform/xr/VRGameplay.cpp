@@ -37,6 +37,7 @@
 #include "game/Item.h"
 #include "game/Player.h"
 #include "graphics/Draw.h"
+#include "graphics/RenderBatcher.h"
 #include "graphics/Renderer.h"
 #include "graphics/Vertex.h"
 #include "graphics/data/Mesh.h"
@@ -615,6 +616,16 @@ void updateGrab() {
 		takeItem(*candidate);
 	}
 	
+}
+
+RenderBatcher & getUiBatcher() {
+	static RenderBatcher batcher;
+	return batcher;
+}
+
+void renderUiBatcher() {
+	getUiBatcher().render();
+	getUiBatcher().clear();
 }
 
 void updateCombat() {

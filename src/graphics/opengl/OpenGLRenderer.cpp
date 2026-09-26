@@ -58,6 +58,8 @@ OpenGLRenderer::OpenGLRenderer()
 	, m_glblendDst(GL_ZERO)
 	, m_framebuffer(0)
 	, m_framebufferSize(0)
+	, m_snapshotFramebuffer(0)
+	, m_snapshotSize(0)
 	, m_MSAALevel(0)
 	, m_hasMSAA(false)
 	, m_hasTextureNPOT(false)
@@ -918,7 +920,21 @@ void OpenGLRenderer::setRenderTarget(GLuint framebuffer, Vec2i size) {
 	
 }
 
+void OpenGLRenderer::setSnapshotSource(GLuint framebuffer, Vec2i size) {
+	m_snapshotFramebuffer = framebuffer;
+	m_snapshotSize = size;
+}
+
 bool OpenGLRenderer::getSnapshot(Image & image) {
+	
+	if(m_snapshotFramebuffer) {
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_snapshotFramebuffer);
+		image.create(size_t(m_snapshotSize.x), size_t(m_snapshotSize.y), Image::Format_R8G8B8);
+		glReadPixels(0, 0, m_snapshotSize.x, m_snapshotSize.y, GL_RGB, GL_UNSIGNED_BYTE, image.getData());
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_framebuffer);
+		image.flipY();
+		return true;
+	}
 	
 	Vec2i size = getRenderTargetSize();
 	

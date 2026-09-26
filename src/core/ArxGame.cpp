@@ -2019,6 +2019,9 @@ void ArxGame::renderLevelStereo() {
 	
 	updateLightFlares();
 	
+	// 2D particles (e.g. the torch icon's fire) go to the UI panel, which is the current target
+	vr::renderUiBatcher();
+	
 	for(size_t eye = 0; eye < xr::EyeCount; eye++) {
 		xr::bindEye(eye);
 		GRenderer->SetFogColor(Color());

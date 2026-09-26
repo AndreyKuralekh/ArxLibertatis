@@ -92,6 +92,13 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "scene/Light.h"
 #include "scene/Tiles.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#include "platform/xr/VRGameplay.h"
+#endif
+
 
 static const size_t MAX_PARTICLES = 2200;
 static long ParticleCount = 0;
@@ -870,6 +877,12 @@ void ARX_PARTICLES_Update()  {
 		float zpos = (part->m_flags & PARTICLE_ZDEC) ? 0.0001f : 2.f;
 		
 		if(part->m_flags & PARTICLE_2D) {
+			#if ARX_HAVE_OPENXR
+			if(xr::isActive()) {
+				// The batcher is drawn into the eye views, 2D particles belong to the UI panel
+				EERIEAddBitmap(vr::getUiBatcher(), mat, in, size, size, tc, color);
+			} else
+			#endif
 			EERIEAddBitmap(mat, in, size, size, tc, color);
 		} else if(part->m_flags & ROTATING) {
 			float rott = MAKEANGLE(float(toMsi(now + GameDuration(elapsed))) * part->m_rotation); // TODO wat

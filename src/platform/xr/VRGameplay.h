@@ -26,6 +26,8 @@
 
 #include "math/Types.h"
 
+class RenderBatcher;
+
 /*!
  * VR interaction with the game world: the player's hands and what they hold.
  *
@@ -76,6 +78,12 @@ bool getRuneScreenPoint(Vec2s & point);
  * Call once per frame after the camera was updated. Replaces the animation driven melee strikes.
  */
 void updateCombat();
+
+//! Batcher for 2D effects that must go to the UI panel instead of the eye views
+RenderBatcher & getUiBatcher();
+
+//! Draw and clear the UI batcher (with the UI panel as the render target)
+void renderUiBatcher();
 
 } // namespace vr
 
