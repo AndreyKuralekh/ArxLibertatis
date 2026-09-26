@@ -168,6 +168,9 @@ static std::array<bool, NUM_ACTION_KEY> previousActions;
 
 } // namespace state
 
+//! Walking thumbstick deflection from which the player runs instead of walking
+static const float RunDeflection = 0.7f;
+
 static OpenGLRenderer * renderer() {
 	return static_cast<OpenGLRenderer *>(GRenderer);
 }
@@ -228,6 +231,17 @@ int getPrimaryHand() {
 
 int getOffHand() {
 	return config.vr.leftHanded ? RightHand : LeftHand;
+}
+
+float getMoveSpeedFactor() {
+	float deflection = glm::length(state::moveStick);
+	if(deflection <= 0.f) {
+		return 1.f;
+	}
+	if(deflection < RunDeflection) {
+		return glm::mix(0.5f, 1.f, deflection / RunDeflection);
+	}
+	return glm::mix(0.7f, 1.f, (deflection - RunDeflection) / (1.f - RunDeflection));
 }
 
 bool getMoveStick(Vec2f & stick) {
@@ -1284,6 +1298,9 @@ static void updateControls() {
 	state::actions[CONTROLS_CUST_WALKBACKWARD] = controls.move.y < -threshold;
 	state::actions[CONTROLS_CUST_STRAFELEFT] = controls.move.x < -threshold;
 	state::actions[CONTROLS_CUST_STRAFERIGHT] = controls.move.x > threshold;
+	// Partial deflection walks (stealth), full deflection runs
+	float deflection = glm::length(state::moveStick);
+	state::actions[CONTROLS_CUST_STEALTHMODE] = deflection > 0.f && deflection < RunDeflection;
 	
 	// Take / use / open what the crosshair points at (the right mouse button toggles free look),
 	// unless the grip grabs something within reach of the hand

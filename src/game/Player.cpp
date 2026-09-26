@@ -132,6 +132,12 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 
 #include "script/Script.h"
 
+#include "Configure.h"
+
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#endif
+
 extern bool REQUEST_SPEECH_SKIP;
 extern bool DONT_ERASE_PLAYER;
 extern bool GLOBAL_MAGIC_MODE;
@@ -1984,6 +1990,13 @@ static void PlayerMovementIterate(float DeltaTime) {
 			}
 			
 			impulse *= scale / glm::length(impulse) * jump_mul;
+			
+			#if ARX_HAVE_OPENXR
+			if(xr::isActive()) {
+				// Analog thumbstick: slower within the walking and running speeds
+				impulse *= xr::getMoveSpeedFactor();
+			}
+			#endif
 		}
 		
 		if(player.jumpphase != NotJumping) {

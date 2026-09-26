@@ -131,6 +131,9 @@ float getWorldScale();
 //! Walking thumbstick (x right, y forward) with dead zone, if deflected
 bool getMoveStick(Vec2f & stick);
 
+//! Factor for the walking or running speed from the thumbstick deflection (1 when not deflected)
+float getMoveSpeedFactor();
+
 //! Number of hand joints, in the order of XrHandJointEXT (palm, wrist, thumb, index, middle, ring, little)
 constexpr size_t HandJointCount = 26;
 
