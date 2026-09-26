@@ -92,6 +92,8 @@ public:
 	/*!
 	 * Render into a framebuffer object instead of the window.
 	 *
+	 * Antialiasing (SetAntialiasing()) uses the sample count of the target.
+	 *
 	 * \param framebuffer The framebuffer object to bind or 0 for the window.
 	 * \param size        The size of the framebuffer. Ignored for the window.
 	 */

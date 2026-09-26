@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -69,6 +70,12 @@ struct Swapchain {
 	std::vector<XrSwapchainImageOpenGLKHR> images;
 	std::vector<GLuint> framebuffers;
 	GLuint depth = 0; //!< Shared depth renderbuffer, 0 if the swapchain has no depth
+	
+	// Optional multisampled target that is resolved into the acquired image
+	GLsizei samples = 0;
+	GLuint msaaFramebuffer = 0;
+	GLuint msaaColor = 0;
+	GLuint msaaDepth = 0;
 	uint32_t current = 0; //!< Index of the acquired image
 	bool acquired = false;
 	bool rendered = false; //!< The game rendered into the acquired image
@@ -136,6 +143,14 @@ static bool pointerEnabled = true;
 static Vec2f moveStick(0.f); //!< Walking thumbstick with dead zone
 static float vignette = 0.f; //!< Current strength of the comfort vignette
 static float vignettePulse = 0.f; //!< Short vignette after a snap turn
+
+// Frame timing statistics for --vr-debug
+static std::chrono::steady_clock::time_point frameWorkStart;
+static XrTime lastDisplayTime = 0;
+static unsigned statFrames = 0;
+static unsigned statMissed = 0;
+static double statWorkSum = 0.0;
+static double statWorkMax = 0.0;
 
 // Controller input mapped to the game
 static input::Controls controls;
@@ -476,10 +491,74 @@ static void destroySwapchain(Swapchain & swapchain) {
 	if(swapchain.depth) {
 		glDeleteRenderbuffers(1, &swapchain.depth);
 	}
+	if(swapchain.msaaFramebuffer) {
+		glDeleteFramebuffers(1, &swapchain.msaaFramebuffer);
+		GLuint renderbuffers[] = { swapchain.msaaColor, swapchain.msaaDepth };
+		glDeleteRenderbuffers(2, renderbuffers);
+	}
 	if(swapchain.handle != XR_NULL_HANDLE) {
 		xrDestroySwapchain(swapchain.handle);
 	}
 	swapchain = Swapchain();
+}
+
+//! Add a multisampled render target to an eye swapchain; the eye still works without it
+static void createMultisampleTarget(Swapchain & swapchain, GLsizei samples) {
+	
+	GLint maxSamples = 0;
+	glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+	samples = std::min(samples, GLsizei(maxSamples));
+	if(samples < 2) {
+		return;
+	}
+	
+	glGenRenderbuffers(1, &swapchain.msaaColor);
+	glBindRenderbuffer(GL_RENDERBUFFER, swapchain.msaaColor);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GLenum(state::colorFormat), swapchain.size.x, swapchain.size.y);
+	glGenRenderbuffers(1, &swapchain.msaaDepth);
+	glBindRenderbuffer(GL_RENDERBUFFER, swapchain.msaaDepth);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, swapchain.size.x, swapchain.size.y);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	
+	GLint oldFramebuffer = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFramebuffer);
+	glGenFramebuffers(1, &swapchain.msaaFramebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, swapchain.msaaFramebuffer);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, swapchain.msaaColor);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, swapchain.msaaDepth);
+	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	glBindFramebuffer(GL_FRAMEBUFFER, GLuint(oldFramebuffer));
+	
+	if(status != GL_FRAMEBUFFER_COMPLETE) {
+		LogWarning << "OpenXR: multisampled eye buffer not supported (0x" << std::hex << status << "), no antialiasing";
+		glDeleteFramebuffers(1, &swapchain.msaaFramebuffer);
+		GLuint renderbuffers[] = { swapchain.msaaColor, swapchain.msaaDepth };
+		glDeleteRenderbuffers(2, renderbuffers);
+		swapchain.msaaFramebuffer = swapchain.msaaColor = swapchain.msaaDepth = 0;
+		return;
+	}
+	
+	swapchain.samples = samples;
+	LogInfo << "OpenXR eye antialiasing: " << samples << "x MSAA";
+}
+
+//! Resolve the multisampled eye images into the swapchain images
+static void resolveEyes() {
+	
+	GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	for(Swapchain & eye : state::eyes) {
+		if(eye.acquired && eye.rendered && eye.msaaFramebuffer) {
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, eye.msaaFramebuffer);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, eye.framebuffers[eye.current]);
+			glBlitFramebuffer(0, 0, eye.size.x, eye.size.y, 0, 0, eye.size.x, eye.size.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, renderer()->getRenderTarget());
+	if(scissor) {
+		glEnable(GL_SCISSOR_TEST);
+	}
+	
 }
 
 static bool createSwapchains() {
@@ -492,6 +571,9 @@ static bool createSwapchains() {
 		Vec2i size(state::viewConfigs[i].recommendedImageRectWidth, state::viewConfigs[i].recommendedImageRectHeight);
 		if(!createSwapchain(state::eyes[i], size, true)) {
 			return false;
+		}
+		if(config.video.antialiasing) {
+			createMultisampleTarget(state::eyes[i], 4);
 		}
 	}
 	
@@ -873,7 +955,9 @@ void bindEye(size_t eye) {
 	arx_assert(eye < EyeCount && hasEyeViews());
 	
 	Swapchain & swapchain = state::eyes[eye];
-	renderer()->setRenderTarget(swapchain.framebuffers[swapchain.current], swapchain.size);
+	GLuint target = swapchain.msaaFramebuffer ? swapchain.msaaFramebuffer : swapchain.framebuffers[swapchain.current];
+	renderer()->setRenderTarget(target, swapchain.size);
+	GRenderer->SetAntialiasing(true);
 	swapchain.rendered = true;
 	
 	GRenderer->SetViewport(Rect(swapchain.size.x, swapchain.size.y));
@@ -1273,6 +1357,7 @@ void beginFrame() {
 	if(!check(xrBeginFrame(state::session, &beginInfo), "xrBeginFrame")) {
 		return;
 	}
+	state::frameWorkStart = std::chrono::steady_clock::now();
 	state::frameBegun = true;
 	state::worldValid = false;
 	
@@ -1419,6 +1504,36 @@ static void dumpFrame() {
 	saved++;
 }
 
+//! Log the frame rate and the time the game takes per frame once per second (--vr-debug)
+static void updateFrameStatistics() {
+	
+	double work = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - state::frameWorkStart).count();
+	state::statFrames++;
+	state::statWorkSum += work;
+	state::statWorkMax = std::max(state::statWorkMax, work);
+	
+	XrTime period = state::frameState.predictedDisplayPeriod;
+	if(state::lastDisplayTime != 0 && period > 0
+	   && state::frameState.predictedDisplayTime - state::lastDisplayTime > period * 3 / 2) {
+		state::statMissed++;
+	}
+	state::lastDisplayTime = state::frameState.predictedDisplayTime;
+	
+	if(period <= 0 || state::statFrames < unsigned(1e9 / double(period))) {
+		return;
+	}
+	
+	if(state::debug) {
+		LogInfo << "VR frames: " << state::statFrames << " at " << (1e9 / double(period)) << " Hz, missed "
+		        << state::statMissed << ", game time per frame avg " << (state::statWorkSum / state::statFrames)
+		        << " ms, max " << state::statWorkMax << " ms (budget " << (double(period) * 1e-6) << " ms)";
+	}
+	state::statFrames = 0;
+	state::statMissed = 0;
+	state::statWorkSum = 0.0;
+	state::statWorkMax = 0.0;
+}
+
 void endFrame() {
 	
 	if(!isActive()) {
@@ -1441,6 +1556,7 @@ void endFrame() {
 	bool eyesReady = state::viewsValid && state::eyes[0].acquired && state::eyes[1].acquired;
 	bool uiReady = state::ui.acquired;
 	if(state::frameState.shouldRender) {
+		resolveEyes();
 		clearUnusedEyes();
 		drawVignette();
 		drawPointerBeam();
@@ -1494,6 +1610,7 @@ void endFrame() {
 	endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	endInfo.layerCount = uint32_t(layers.size());
 	endInfo.layers = layers.data();
+	updateFrameStatistics();
 	check(xrEndFrame(state::session, &endInfo), "xrEndFrame");
 	
 	state::frameBegun = false;

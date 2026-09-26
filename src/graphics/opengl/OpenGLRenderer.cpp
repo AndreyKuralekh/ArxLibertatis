@@ -896,6 +896,16 @@ void OpenGLRenderer::setRenderTarget(GLuint framebuffer, Vec2i size) {
 	m_framebuffer = framebuffer;
 	m_framebufferSize = size;
 	
+	// Multisampling depends on the target (see reinit() for the window)
+	GLint samples = 0;
+	glGetIntegerv(GL_SAMPLES, &samples);
+	if(samples != m_MSAALevel) {
+		if(samples <= 0 && m_hasMSAA) {
+			SetAntialiasing(false);
+		}
+		m_MSAALevel = samples;
+	}
+	
 	// Viewport and scissor coordinates are flipped using the target height - apply them again
 	Rect oldViewport = viewport;
 	viewport = Rect(-1, -1, -1, -1);
