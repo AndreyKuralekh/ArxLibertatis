@@ -172,6 +172,12 @@ extern EntityHandle LastSelectedIONum;
 
 void ARX_INTERFACE_setCombatMode(ARX_INTERFACE_COMBAT_MODE i);
 
+/*!
+ * Act on an entity as when double-clicking it: talk to an NPC, open a container
+ * or send the action event to its script.
+ */
+void ARX_INTERFACE_useEntity(Entity * target);
+
 bool ARX_INTERFACE_MouseInBook();
 
 void ARX_INTERFACE_Reset();

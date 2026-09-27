@@ -643,6 +643,71 @@ void ARX_INTERFACE_setCombatMode(ARX_INTERFACE_COMBAT_MODE i) {
 long CSEND = 0;
 long MOVE_PRECEDENCE = 0;
 
+void ARX_INTERFACE_useEntity(Entity * target) {
+	
+	arx_assert(target);
+	
+	if(target->ioflags & IO_NPC) {
+		if(target->script.valid) {
+			if(target->_npcdata->lifePool.current > 0.f) {
+				SendIOScriptEvent(entities.player(), target, SM_CHAT);
+				DRAGGING = false;
+			} else {
+				if(target->inventory) {
+					
+					if((player.Interface & INTER_STEAL) && ioSteal && target != ioSteal) {
+						SendIOScriptEvent(entities.player(), ioSteal, SM_STEAL, "off");
+						player.Interface &= ~INTER_STEAL;
+					}
+					
+					g_secondaryInventoryHud.open(target);
+					
+					if(player.Interface & INTER_INVENTORYALL) {
+						ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
+						g_playerInventoryHud.close();
+					} else if(player.Interface & INTER_INVENTORY) {
+						ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
+					}
+					
+					if(g_secondaryInventoryHud.isOpen()) {
+						bForceEscapeFreeLook = true;
+						lOldTruePlayerMouseLook = !TRUE_PLAYER_MOUSELOOK_ON;
+					}
+					
+				}
+			}
+		}
+	} else {
+		if(target->inventory) {
+			
+			if(player.Interface & INTER_STEAL) {
+				if(ioSteal && target != ioSteal) {
+					SendIOScriptEvent(entities.player(), ioSteal, SM_STEAL, "off");
+					player.Interface &= ~INTER_STEAL;
+				}
+			}
+			
+			g_secondaryInventoryHud.open(target);
+			
+			if(player.Interface & INTER_INVENTORYALL) {
+				ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
+				g_playerInventoryHud.close();
+			}
+			
+			if(g_secondaryInventoryHud.isOpen()) {
+				bForceEscapeFreeLook = true;
+				lOldTruePlayerMouseLook = !TRUE_PLAYER_MOUSELOOK_ON;
+			}
+			
+		} else if(target->script.valid) {
+			SendIOScriptEvent(entities.player(), target, SM_ACTION);
+		}
+		
+		DRAGGING = false;
+	}
+
+}
+
 extern PlatformInstant REQUEST_JUMP;
 //-----------------------------------------------------------------------------
 void ArxGame::managePlayerControls() {
@@ -653,67 +718,8 @@ void ArxGame::managePlayerControls() {
 	   && !g_secondaryInventoryHud.containsPos(DANAEMouse) && !g_playerInventoryHud.containsPos(DANAEMouse)
 	   && !g_cursorOverBook && eMouseState != MOUSE_IN_NOTE) {
 		
-		Entity * t = InterClick(DANAEMouse);
-
-		if(t) {
-			if(t->ioflags & IO_NPC) {
-				if(t->script.valid) {
-					if(t->_npcdata->lifePool.current > 0.f) {
-						SendIOScriptEvent(entities.player(), t, SM_CHAT);
-						DRAGGING = false;
-					} else {
-						if(t->inventory) {
-							
-							if((player.Interface & INTER_STEAL) && ioSteal && t != ioSteal) {
-								SendIOScriptEvent(entities.player(), ioSteal, SM_STEAL, "off");
-								player.Interface &= ~INTER_STEAL;
-							}
-							
-							g_secondaryInventoryHud.open(t);
-							
-							if(player.Interface & INTER_INVENTORYALL) {
-								ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
-								g_playerInventoryHud.close();
-							} else if(player.Interface & INTER_INVENTORY) {
-								ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
-							}
-							
-							if(g_secondaryInventoryHud.isOpen()) {
-								bForceEscapeFreeLook = true;
-								lOldTruePlayerMouseLook = !TRUE_PLAYER_MOUSELOOK_ON;
-							}
-							
-						}
-					}
-				}
-			} else {
-				if(t->inventory) {
-					
-					if(player.Interface & INTER_STEAL) {
-						if(ioSteal && t != ioSteal) {
-							SendIOScriptEvent(entities.player(), ioSteal, SM_STEAL, "off");
-							player.Interface &= ~INTER_STEAL;
-						}
-					}
-					
-					g_secondaryInventoryHud.open(t);
-					
-					if(player.Interface & INTER_INVENTORYALL) {
-						ARX_SOUND_PlayInterface(g_snd.BACKPACK, Random::getf(0.9f, 1.1f));
-						g_playerInventoryHud.close();
-					}
-					
-					if(g_secondaryInventoryHud.isOpen()) {
-						bForceEscapeFreeLook = true;
-						lOldTruePlayerMouseLook = !TRUE_PLAYER_MOUSELOOK_ON;
-					}
-					
-				} else if(t->script.valid) {
-					SendIOScriptEvent(entities.player(), t, SM_ACTION);
-				}
-				
-				DRAGGING = false;
-			}
+		if(Entity * target = InterClick(DANAEMouse)) {
+			ARX_INTERFACE_useEntity(target);
 		}
 	}
 	
