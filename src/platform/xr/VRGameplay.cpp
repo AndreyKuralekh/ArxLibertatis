@@ -46,6 +46,7 @@
 #include "graphics/Vertex.h"
 #include "graphics/data/Mesh.h"
 #include "graphics/particle/MagicFlare.h"
+#include "graphics/particle/ParticleEffects.h"
 #include "graphics/particle/Spark.h"
 #include "gui/Interface.h"
 #include "input/Input.h"
@@ -287,6 +288,45 @@ void updateWeaponGrip() {
 	g_weaponGrip.transform = t;
 	g_weaponGrip.weapon = weapon;
 	g_weaponGrip.valid = true;
+	
+}
+
+/*
+ * Torch held in the left hand
+ */
+
+struct TorchGrip {
+	
+	EERIE_3DOBJ * obj = nullptr;
+	glm::quat calibration = quat_identity(); //!< Rotates the handle-to-fire direction onto the hand's forward axis
+	Vec3f attach = Vec3f(0.f); //!< Where the hand holds the model, in model space
+	
+	bool valid = false; //!< The torch is in the hand this frame
+	TransformInfo transform;
+	
+};
+
+TorchGrip g_torchGrip;
+
+//! Find how to hold a torch model: the stick goes through the fist, the fire points forward like a blade
+void calibrateTorch(EERIE_3DOBJ * obj) {
+	
+	g_torchGrip.obj = obj;
+	g_torchGrip.calibration = quat_identity();
+	g_torchGrip.attach = obj->vertexlist[obj->origin].v;
+	
+	for(const EERIE_ACTIONLIST & action : obj->actionlist) {
+		if(action.name == "primary_attach") {
+			g_torchGrip.attach = obj->vertexlist[action.idx].v;
+		}
+	}
+	
+	if(obj->fastaccess.fire) {
+		Vec3f fire = obj->vertexlist[obj->fastaccess.fire].v;
+		if(glm::distance(fire, g_torchGrip.attach) > 1.f) {
+			g_torchGrip.calibration = glm::rotation(glm::normalize(fire - g_torchGrip.attach), Vec3f(0.f, 0.f, 1.f));
+		}
+	}
 	
 }
 
@@ -842,7 +882,7 @@ void prepareHands() {
 
 void renderHands() {
 	
-	if(g_handVertices.empty() && !g_weaponGrip.valid) {
+	if(g_handVertices.empty() && !g_weaponGrip.valid && !g_torchGrip.valid) {
 		return;
 	}
 	
@@ -860,6 +900,47 @@ void renderHands() {
 		DrawEERIEInter(g_weaponGrip.weapon->obj, g_weaponGrip.transform, g_weaponGrip.weapon, true, invisibility);
 		PopAllTriangleListOpaque();
 		PopAllTriangleListTransparency();
+	}
+	
+	if(g_torchGrip.valid && player.torch && player.torch->obj == g_torchGrip.obj) {
+		float invisibility = std::min(0.9f, entities.player()->invisibility);
+		DrawEERIEInter(player.torch->obj, g_torchGrip.transform, player.torch, true, invisibility);
+		PopAllTriangleListOpaque();
+		PopAllTriangleListTransparency();
+	}
+	
+}
+
+void updateTorch() {
+	
+	g_torchGrip.valid = false;
+	
+	Entity * torch = player.torch;
+	Vec3f position;
+	glm::mat3 orientation;
+	if(!torch || !torch->obj || !xr::getHandPose(xr::getOffHand(), true, position, orientation)) {
+		return;
+	}
+	
+	if(g_torchGrip.obj != torch->obj) {
+		calibrateTorch(torch->obj);
+	}
+	
+	// Same placement as the weapon: the grip point of the torch is at the hand
+	TransformInfo t(position, glm::quat_cast(orientation) * g_torchGrip.calibration, torch->scale);
+	t.pos = t(torch->obj->vertexlist[torch->obj->origin].v - g_torchGrip.attach);
+	// Update the world positions now for the fire, drawing happens later for each eye
+	DrawEERIEInter_ModelTransform(torch->obj, t);
+	
+	g_torchGrip.transform = t;
+	g_torchGrip.valid = true;
+	
+	if(torch->obj->fastaccess.fire) {
+		// Flames at the tip like a burning torch in the world, and the torch light moves with the hand
+		// (ManageTorch() keeps its brightness and flicker)
+		Vec3f fire = torch->obj->vertexWorldPositions[torch->obj->fastaccess.fire].v;
+		createFireParticles(fire, 2, 2ms);
+		lightHandleGet(torchLightHandle)->pos = fire;
 	}
 	
 }

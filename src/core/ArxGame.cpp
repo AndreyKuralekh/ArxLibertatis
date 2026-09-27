@@ -1842,6 +1842,11 @@ void ArxGame::updateLevel() {
 	ARX_SPELLS_UpdateSymbolDraw();
 
 	ManageTorch();
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		vr::updateTorch();
+	}
+	#endif
 	
 	{
 		

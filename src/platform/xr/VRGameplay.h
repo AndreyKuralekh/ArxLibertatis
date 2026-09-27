@@ -82,6 +82,14 @@ bool getRuneScreenPoint(Vec2s & point);
 void updateCombat();
 
 /*!
+ * Hold the lit torch (player.torch) in the left hand: its model follows the hand, fire burns at
+ * its tip and the torch light moves with it.
+ *
+ * Call once per frame after ManageTorch(), whose light position it replaces.
+ */
+void updateTorch();
+
+/*!
  * Continue the controller pointer into the world when it misses the UI panel in cursor mode:
  * the game cursor goes where the camera sees what the ray hits, so items can be combined with,
  * given to or dropped onto things outside of the panel.
