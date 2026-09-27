@@ -19,8 +19,10 @@
 
 #include "platform/xr/VRGameplay.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -525,6 +527,111 @@ bool getFingertip(Vec3f & tip) {
 	return false;
 }
 
+/*
+ * Doors, levers, chests and NPCs used by touching them with the right hand
+ */
+
+const float TouchReach = 15.f; //!< Maximum distance from the hand or fingertip to the surface of a model
+
+bool g_touchUsed = false; //!< The current grip press already used a touched entity
+
+//! Closest point to p on the triangle abc (Ericson, Real-Time Collision Detection, 5.1.5)
+Vec3f closestPointOnTriangle(const Vec3f & p, const Vec3f & a, const Vec3f & b, const Vec3f & c) {
+	
+	Vec3f ab = b - a;
+	Vec3f ac = c - a;
+	Vec3f ap = p - a;
+	float d1 = glm::dot(ab, ap);
+	float d2 = glm::dot(ac, ap);
+	if(d1 <= 0.f && d2 <= 0.f) {
+		return a;
+	}
+	
+	Vec3f bp = p - b;
+	float d3 = glm::dot(ab, bp);
+	float d4 = glm::dot(ac, bp);
+	if(d3 >= 0.f && d4 <= d3) {
+		return b;
+	}
+	
+	float vc = d1 * d4 - d3 * d2;
+	if(vc <= 0.f && d1 >= 0.f && d3 <= 0.f) {
+		return a + ab * (d1 / (d1 - d3));
+	}
+	
+	Vec3f cp = p - c;
+	float d5 = glm::dot(ab, cp);
+	float d6 = glm::dot(ac, cp);
+	if(d6 >= 0.f && d5 <= d6) {
+		return c;
+	}
+	
+	float vb = d5 * d2 - d1 * d6;
+	if(vb <= 0.f && d2 >= 0.f && d6 <= 0.f) {
+		return a + ac * (d2 / (d2 - d6));
+	}
+	
+	float va = d3 * d6 - d5 * d4;
+	if(va <= 0.f && (d4 - d3) >= 0.f && (d5 - d6) >= 0.f) {
+		return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+	}
+	
+	float denom = 1.f / (va + vb + vc);
+	return a + ab * (vb * denom) + ac * (vc * denom);
+}
+
+//! Distance from a point to the surface of an entity's model as last drawn
+float distanceToModel(const EERIE_3DOBJ & obj, const Vec3f & point) {
+	
+	float best = std::numeric_limits<float>::max();
+	for(const EERIE_FACE & face : obj.facelist) {
+		if(size_t(face.vid[0]) >= obj.vertexWorldPositions.size()
+		   || size_t(face.vid[1]) >= obj.vertexWorldPositions.size()
+		   || size_t(face.vid[2]) >= obj.vertexWorldPositions.size()) {
+			continue;
+		}
+		Vec3f a = obj.vertexWorldPositions[face.vid[0]].v;
+		Vec3f b = obj.vertexWorldPositions[face.vid[1]].v;
+		Vec3f c = obj.vertexWorldPositions[face.vid[2]].v;
+		best = std::min(best, glm::distance(point, closestPointOnTriangle(point, a, b, c)));
+	}
+	
+	return best;
+}
+
+//! The door, lever, container or NPC that the hand or fingertip touches, if any
+Entity * findTouchTarget(const Vec3f * points, size_t count) {
+	
+	Entity * best = nullptr;
+	float bestDistance = TouchReach;
+	for(Entity & entity : entities.inScene(IO_FIX | IO_NPC)) {
+		
+		if(&entity == entities.player() || !entity.obj
+		   || !(entity.gameFlags & GFLAG_INTERACTIVITY) || !(entity.gameFlags & GFLAG_ISINTREATZONE)
+		   || (entity.gameFlags & (GFLAG_INVISIBILITY | GFLAG_MEGAHIDE))
+		   || !(entity.script.valid || entity.inventory)) {
+			continue;
+		}
+		
+		for(size_t i = 0; i < count; i++) {
+			const Vec3f & point = points[i];
+			const EERIE_3D_BBOX & box = entity.bbox3D;
+			if(glm::any(glm::lessThan(point, box.min - Vec3f(TouchReach)))
+			   || glm::any(glm::greaterThan(point, box.max + Vec3f(TouchReach)))) {
+				continue;
+			}
+			float distance = distanceToModel(*entity.obj, point);
+			if(distance < bestDistance) {
+				best = &entity;
+				bestDistance = distance;
+			}
+		}
+		
+	}
+	
+	return best;
+}
+
 } // anonymous namespace
 
 void updateMagic() {
@@ -608,14 +715,37 @@ void updateGrab() {
 	}
 	g_grab.held = EntityHandle();
 	
+	if(!xr::isGrabbing()) {
+		g_touchUsed = false;
+	}
+	
 	Entity * candidate = valid ? findItemInReach(hand) : nullptr;
-	xr::setGrabCandidate(candidate != nullptr);
+	
+	// Without an item within reach: use what the hand touches, like double-clicking it
+	Entity * touched = nullptr;
+	if(!candidate && valid && !(player.Interface & INTER_COMBATMODE) && !player.doingmagic) {
+		std::array<Vec3f, 2> points = { hand, hand };
+		size_t count = getFingertip(points[1]) ? 2 : 1;
+		touched = findTouchTarget(points.data(), count);
+	}
+	
+	xr::setGrabCandidate(candidate != nullptr || touched != nullptr);
+	
+	if(touched) {
+		touched->highlightColor = Color3f::gray(40.f);
+		if(xr::isGrabbing() && !g_touchUsed) {
+			g_touchUsed = true;
+			ARX_INTERFACE_useEntity(touched);
+		}
+		return;
+	}
+	
 	if(!candidate) {
 		return;
 	}
 	
 	candidate->highlightColor = Color3f::gray(40.f);
-	if(xr::isGrabbing()) {
+	if(xr::isGrabbing() && !g_touchUsed) {
 		takeItem(*candidate);
 	}
 	

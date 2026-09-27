@@ -50,6 +50,8 @@ void renderHands();
 /*!
  * Take items with the right hand: grip near an item holds it, releasing the grip drops or throws it,
  * releasing it next to the head puts it into the inventory.
+ * Without an item within reach, grip on a touched door, lever, container or NPC uses it as
+ * double-clicking it would (ARX_INTERFACE_useEntity()).
  *
  * Call once per frame after the camera was updated.
  */
