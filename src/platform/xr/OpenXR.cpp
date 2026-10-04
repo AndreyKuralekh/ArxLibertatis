@@ -994,6 +994,27 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii) {
 	return true;
 }
 
+bool getHandJointTransforms(int hand, glm::mat4x4 * transforms) {
+	
+	if(!state::worldValid || hand < 0 || hand >= input::HandCount) {
+		return false;
+	}
+	
+	const input::HandState & state = input::getControls().hands[size_t(hand)];
+	if(!state.jointsValid) {
+		return false;
+	}
+	
+	// As localToWorld(), but keeping the axes of the joint space instead of converting them
+	glm::mat3 trackingToWorld = state::worldBody * flipYZ * state::worldUnyaw * getWorldScale();
+	for(size_t i = 0; i < state.joints.size(); i++) {
+		glm::mat4x4 transform(trackingToWorld * toMat3(state.joints[i].pose.orientation));
+		transform[3] = Vec4f(localToWorld(state.joints[i].pose.position), 1.f);
+		transforms[i] = transform;
+	}
+	return true;
+}
+
 void setPointerEnabled(bool enabled) {
 	state::pointerEnabled = enabled;
 }

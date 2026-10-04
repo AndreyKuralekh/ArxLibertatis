@@ -144,6 +144,13 @@ bool getHandPose(int hand, bool grip, Vec3f & position, glm::mat3 & orientation)
 bool getHandJoints(int hand, Vec3f * positions, float * radii);
 
 /*!
+ * Transforms of the finger joints from their own space (in meters, with the OpenXR axes of the
+ * joint: -z along the bone towards the fingertip, +y out of the back of the hand) to the world,
+ * for skinning a hand model. One matrix per XrHandJointEXT, if the runtime tracks the fingers.
+ */
+bool getHandJointTransforms(int hand, glm::mat4x4 * transforms);
+
+/*!
  * Position of a point attached to the holding pose of a hand in the tracking space, in meters.
  *
  * Unlike world positions this does not change when the player moves or turns with the thumbsticks,
