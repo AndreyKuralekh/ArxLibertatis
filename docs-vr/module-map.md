@@ -263,5 +263,7 @@
 |---|---|
 | OpenXR: instance/session, swapchain'ы (глаза 2688×2880 + MSAA, UI 1280×720), цикл кадра, поза головы, перепроекция, recenter, лазер, виньетка, миниатюры, `--vr*` | `platform/xr/OpenXR.{h,cpp}` |
 | Действия контроллеров, позы рук, скелет пальцев | `platform/xr/XrInput.{h,cpp}` |
-| Кисти, оружие в руке, физический удар, хват предметов, руны пальцем, лазер в мир (`updatePointer`), касание = действие, факел (`updateTorch`), лук (`updateBow`), UI-батчер | `platform/xr/VRGameplay.{h,cpp}` |
+| Кисти, оружие в руке, физический удар, хват предметов, руны пальцем, лазер в мир (`updatePointer`), касание = действие, факел (`updateTorch`), лук (`updateBow`), тело героя (`foldPlayerFirstPerson`), UI-батчер | `platform/xr/VRGameplay.{h,cpp}` |
+| Модель кисти: загрузка `.vrhand`, скиннинг, сгиб пальцев | `platform/xr/VRHandModel.{h,cpp}`, `tools/vr/convert-hand-model.py` |
+| Шаг в комнате (`xr::getRoomMove` → `ARX_PLAYER_Manage_Movement`), поворот корпуса (`xr::getBodyYaw` → `Player.cpp`) | `platform/xr/OpenXR.cpp`, `game/Player.cpp` |
 | Точки вставки в движок (под `ARX_HAVE_OPENXR`) | `core/ArxGame.cpp` (init, кадр, `updateActiveCamera`, `renderLevelStereo`), `window/SDL2Window.cpp` (`showFrame`), `graphics/opengl/OpenGLRenderer.*` (render target, перепроекция, снимки), `input/Input.cpp`, `gui/Interface.cpp` (ходьба), `gui/MainMenu.cpp` (страница VR), `gui/Cursor.cpp`, `game/Player.cpp`, `game/Spells.cpp`, `core/Core.cpp` (удары), `scene/Scene.cpp`, `graphics/Draw.cpp`, `graphics/GlobalFog.cpp`, `graphics/particle/*`, `core/Config.*` |
