@@ -855,7 +855,9 @@ void recenter() {
 
 bool getRoomMove(float seconds, Vec3f & move) {
 	
-	if(!state::worldValid || !state::worldPlayerView || !state::viewsValid || state::recenterRequested) {
+	// The player moves before the camera of this frame is set up: use the body directions of the last
+	// frame, which stay valid (state::worldValid is only about the hand poses of this frame)
+	if(!state::worldPlayerView || !state::viewsValid || state::recenterRequested) {
 		state::roomFollowing = false;
 		return false;
 	}
