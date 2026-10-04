@@ -90,6 +90,8 @@ std::vector<TexturedVertex> g_handVertices;
 bool g_palmValid[2] = { false, false };
 Vec3f g_palm[2] = { Vec3f(0.f), Vec3f(0.f) };
 Vec3f g_wrist[2] = { Vec3f(0.f), Vec3f(0.f) };
+bool g_thumbSideValid[2] = { false, false };
+Vec3f g_thumbSide[2] = { Vec3f(0.f), Vec3f(0.f) }; //!< Direction from the wrist to the side of the thumb
 Vec3f g_handsPlayerPos = Vec3f(0.f); //!< Where the player was then: the hands move along with the player
 
 /*!
@@ -1092,6 +1094,7 @@ void prepareHands() {
 		HandSkeleton skeleton;
 		bool tracked = xr::getHandJoints(hand, skeleton.positions.data(), skeleton.radii.data());
 		g_palmValid[hand] = false;
+		g_thumbSideValid[hand] = false;
 		if(!tracked && !createSyntheticHand(hand, skeleton)) {
 			continue;
 		}
@@ -1118,6 +1121,12 @@ void prepareHands() {
 			std::array<glm::mat4x4, xr::HandJointCount> joints;
 			const HandModel * model = getHandModel(hand);
 			if(model && xr::getHandJointTransforms(hand, joints.data())) {
+				// In the space of the wrist joint x points to the right: away from the thumb of the right hand
+				Vec3f across = Vec3f(joints[JointWrist][0]);
+				if(glm::length(across) > 1e-6f) {
+					g_thumbSide[hand] = glm::normalize(across) * ((hand == xr::RightHand) ? -1.f : 1.f);
+					g_thumbSideValid[hand] = true;
+				}
 				if(xr::areHandJointsFromController(hand)) {
 					// The runtime only knows where the controller is and reports a flat hand:
 					// hold the controller instead, with the fingers following the trigger and the grip.
@@ -1282,12 +1291,13 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 		const char * fore;
 		const char * wrist;
 		const char * hand;
+		const char * thumb;
 		int tracked;
 		float side;
 	};
 	const Arm arms[] = {
-		{ "left_arm", "left_elbow", "left_wrist", "left_hand", xr::LeftHand, -1.f },
-		{ "right_arm", "right_elbow", "right_wrist", "right_hand", xr::RightHand, 1.f },
+		{ "left_arm", "left_elbow", "left_wrist", "left_hand", "left_hand_thumb", xr::LeftHand, -1.f },
+		{ "right_arm", "right_elbow", "right_wrist", "right_hand", "right_hand_thumb", xr::RightHand, 1.f },
 	};
 	
 	// The hands were located when they were last drawn, the player may have moved since.
@@ -1353,11 +1363,32 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 				// Turn each segment from where the animation has it to where it has to point
 				glm::quat turnUpper = glm::rotation(glm::normalize(elbow0 - shoulder), glm::normalize(elbow - shoulder));
 				glm::quat turnFore = glm::rotation(glm::normalize(wrist0 - elbow0), glm::normalize(end - elbow));
+				
+				// Roll the forearm around its axis so that the thumb side of the model's hand is where
+				// the thumb of the VR hand is: all the way at the wrist, half of it along the forearm
+				glm::quat rollFore = quat_identity();
+				glm::quat rollWrist = quat_identity();
+				VertexGroupId thumb = EERIE_OBJECT_GetGroup(&obj, arm.thumb);
+				if(thumb && g_thumbSideValid[arm.tracked]) {
+					Vec3f axis = glm::normalize(end - elbow);
+					Vec3f from = turnFore * (rig.bones[thumb].anim.trans - rig.bones[hand].anim.trans);
+					Vec3f to = g_thumbSide[arm.tracked];
+					from -= axis * glm::dot(from, axis);
+					to -= axis * glm::dot(to, axis);
+					if(glm::length(from) > 1e-3f && glm::length(to) > 1e-3f) {
+						from = glm::normalize(from);
+						to = glm::normalize(to);
+						float angle = std::atan2(glm::dot(glm::cross(from, to), axis), glm::dot(from, to));
+						rollFore = glm::angleAxis(angle * 0.5f, axis);
+						rollWrist = glm::angleAxis(angle, axis);
+					}
+				}
+				
 				rig.bones[upper].anim.quat = turnUpper * rig.bones[upper].anim.quat;
 				rig.bones[fore].anim.trans = elbow;
-				rig.bones[fore].anim.quat = turnFore * rig.bones[fore].anim.quat;
+				rig.bones[fore].anim.quat = rollFore * turnFore * rig.bones[fore].anim.quat;
 				rig.bones[wrist].anim.trans = end;
-				rig.bones[wrist].anim.quat = turnFore * rig.bones[wrist].anim.quat;
+				rig.bones[wrist].anim.quat = rollWrist * turnFore * rig.bones[wrist].anim.quat;
 				foldInto(hand, end);
 				
 				solved = true;
