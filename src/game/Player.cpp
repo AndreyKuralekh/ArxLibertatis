@@ -1796,6 +1796,11 @@ static void setPlayerPositionColor() {
 	
 }
 
+#if ARX_HAVE_OPENXR
+//! Movement of the VR player around the room still to be walked in the game this frame
+static Vec3f g_vrRoomMove(0.f);
+#endif
+
 static void PlayerMovementIterate(float DeltaTime) {
 	
 	float d = 0;
@@ -2106,8 +2111,14 @@ static void PlayerMovementIterate(float DeltaTime) {
 		// Reset forces
 		player.physics.forces = Vec3f(0.f);
 		
+		bool roomMove = false;
+		#if ARX_HAVE_OPENXR
+		roomMove = (g_vrRoomMove != Vec3f(0.f));
+		#endif
+		
 		// Check if player is already on firm ground AND not moving
-		if(glm::abs(player.physics.velocity.x) < 0.001f
+		if(!roomMove
+		   && glm::abs(player.physics.velocity.x) < 0.001f
 		   && glm::abs(player.physics.velocity.z) < 0.001f
 		   && player.onfirmground
 		   && player.jumpphase == NotJumping
@@ -2121,6 +2132,11 @@ static void PlayerMovementIterate(float DeltaTime) {
 		player.physics.cyl.origin = player.basePosition();
 		player.physics.startpos = player.physics.cyl.origin;
 		player.physics.targetpos = player.physics.startpos + player.physics.velocity * DeltaTime;
+		#if ARX_HAVE_OPENXR
+		// Steps in the room are steps in the game, with the same collisions
+		player.physics.targetpos += g_vrRoomMove;
+		g_vrRoomMove = Vec3f(0.f);
+		#endif
 		
 		// Jump impulse
 		if(player.jumpphase == JumpAscending) {
@@ -2270,6 +2286,15 @@ void ARX_PLAYER_Manage_Movement() {
 	static float StoredTime = 0;
 
 	float DeltaTime = std::min(toMsf(g_platformTime.lastFrameDuration()), MAX_FRAME_TIME);
+	
+	#if ARX_HAVE_OPENXR
+	// The player walks after the head when it moves away from the body in the room
+	const Vec3f roomStart = player.pos;
+	Vec3f roomMove(0.f);
+	bool roomMoving = xr::isActive() && !player.climbing && xr::getRoomMove(DeltaTime / 1000.f, roomMove);
+	g_vrRoomMove = roomMoving ? roomMove : Vec3f(0.f);
+	#endif
+	
 	DeltaTime = StoredTime + DeltaTime * speedfactor;
 	
 	if(player.jumpphase != NotJumping) {
@@ -2291,6 +2316,17 @@ void ARX_PLAYER_Manage_Movement() {
 	}
 	
 	StoredTime = DeltaTime;
+	
+	#if ARX_HAVE_OPENXR
+	if(roomMoving) {
+		// Only what was not stopped by a wall brings the body back under the head
+		Vec3f walked(player.pos.x - roomStart.x, 0.f, player.pos.z - roomStart.z);
+		float along = glm::clamp(glm::dot(walked, roomMove) / glm::dot(roomMove, roomMove), 0.f, 1.f);
+		xr::consumeRoomMove(roomMove * along);
+		g_vrRoomMove = Vec3f(0.f);
+	}
+	#endif
+	
 }
 
 /*!

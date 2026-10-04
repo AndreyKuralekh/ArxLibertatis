@@ -99,6 +99,18 @@ Camera * applyHeadPose(const Camera & base, bool playerView);
 float getPlayerYaw();
 
 /*!
+ * Walking around the room: how far the player should walk this frame to get back under the
+ * head, in world units on the floor plane.
+ *
+ * \param seconds Duration of the frame, the player follows at a limited speed.
+ * \return false if the head is (still) over the body.
+ */
+bool getRoomMove(float seconds, Vec3f & move);
+
+//! Tell how far the player really walked for getRoomMove(): the head is that much closer to the body
+void consumeRoomMove(const Vec3f & moved);
+
+/*!
  * Direction of the visible body of the player in the game world in degrees. It follows the
  * view (getPlayerYaw()) with a delay: at once when walking or turning with the thumbstick,
  * otherwise after the head looked away from it for a second.

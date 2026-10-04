@@ -134,6 +134,7 @@ static bool controllerHands = false;
 static bool worldValid = false;
 static Vec3f worldOrigin(0.f);
 static glm::mat3 worldBody(1.f);
+static bool worldPlayerView = false; //!< The last head pose was applied to the view of the player
 static glm::mat3 worldUnyaw(1.f);
 static Vec3f worldTrackingOrigin(0.f);
 
@@ -147,6 +148,7 @@ static bool avatarYawValid = false;
 static float avatarYaw = 0.f;
 static float avatarTimer = 0.f; //!< For how long the view has been turned away from the body (seconds)
 static bool avatarTurning = false;
+static bool roomFollowing = false; //!< The player is walking after the head that moved away in the room
 static bool grabCandidate = false; //!< Something is within reach of the right hand
 static bool grabbing = false; //!< The current right grip press is a grab
 static bool pointerEnabled = true;
@@ -851,6 +853,46 @@ void recenter() {
 	state::recenterRequested = true;
 }
 
+bool getRoomMove(float seconds, Vec3f & move) {
+	
+	if(!state::worldValid || !state::worldPlayerView || !state::viewsValid || state::recenterRequested) {
+		state::roomFollowing = false;
+		return false;
+	}
+	
+	// Where the head is over the floor relative to where it was recentered, which is where the body is
+	Vec3f head = (toVec3(state::views[0].pose.position) + toVec3(state::views[1].pose.position)) * 0.5f;
+	Vec3f local = state::worldUnyaw * (head - toVec3(state::recenterPosition));
+	local.y = 0.f;
+	float distance = glm::length(local);
+	
+	// Leaning a little does not move the feet
+	const float start = 0.08f;
+	const float stop = 0.02f;
+	const float speed = 1.5f; // m/s
+	if(distance > start) {
+		state::roomFollowing = true;
+	} else if(distance < stop) {
+		state::roomFollowing = false;
+	}
+	if(!state::roomFollowing || distance < 1e-4f) {
+		return false;
+	}
+	
+	float step = std::min(distance, speed * std::max(seconds, 0.f));
+	move = state::worldBody * (flipYZ * local) * (getWorldScale() * step / distance);
+	move.y = 0.f;
+	return true;
+}
+
+void consumeRoomMove(const Vec3f & moved) {
+	// The inverse of the conversion above: the recentered position follows the body
+	Vec3f local = glm::transpose(state::worldUnyaw) * (flipYZ * (glm::transpose(state::worldBody) * moved));
+	local /= getWorldScale();
+	state::recenterPosition.x += local.x;
+	state::recenterPosition.z += local.z;
+}
+
 float getBodyYaw() {
 	return state::avatarYawValid ? state::avatarYaw : state::playerYaw;
 }
@@ -955,6 +997,7 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 	}
 	
 	state::worldValid = true;
+	state::worldPlayerView = playerView;
 	state::worldOrigin = base.m_pos;
 	state::worldBody = body;
 	state::worldUnyaw = unyaw;
