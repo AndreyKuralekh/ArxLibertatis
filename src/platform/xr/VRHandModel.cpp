@@ -22,6 +22,9 @@
 #if ARX_HAVE_OPENXR
 
 #include <cstring>
+#include <iterator>
+
+#include <glm/gtc/matrix_transform.hpp>
 #include <string>
 
 #include "io/log/Logger.h"
@@ -115,6 +118,10 @@ bool HandModel::load(const res::path & file) {
 		return false;
 	}
 	
+	for(size_t i = 0; i < JointCount; i++) {
+		m_bind[i] = glm::inverse(m_inverseBind[i]);
+	}
+	
 	m_indices = std::move(triangles);
 	
 	LogInfo << "Loaded VR hand model " << file << ": " << vertices << " vertices, " << (indices / 3) << " triangles";
@@ -148,6 +155,44 @@ void HandModel::skin(const glm::mat4x4 * joints, std::vector<Vec3f> & positions,
 		float length = glm::length(skinnedNormal);
 		positions[i] = skinnedPosition;
 		normals[i] = (length > 1e-6f) ? skinnedNormal / length : Vec3f(0.f, -1.f, 0.f);
+	}
+	
+}
+
+void HandModel::curlFingers(const float * curls, glm::mat4x4 * joints) const {
+	
+	// XrHandJointEXT: palm, wrist, then four thumb joints and five joints for each other finger,
+	// each from the metacarpal to the tip
+	const size_t wrist = 1;
+	const size_t first[FingerCount] = { 2, 6, 11, 16, 21 };
+	const size_t count[FingerCount] = { 4, 5, 5, 5, 5 };
+	// Bend at the joints after the metacarpal for a fist (degrees); the thumb bends less
+	const float thumbBend[2] = { 35.f, 50.f };
+	const float fingerBend[3] = { 80.f, 100.f, 60.f };
+	
+	std::array<glm::mat4x4, JointCount> posed = m_bind;
+	for(size_t finger = 0; finger < FingerCount; finger++) {
+		size_t tip = first[finger] + count[finger] - 1;
+		size_t bends = (finger == 0) ? std::size(thumbBend) : std::size(fingerBend);
+		for(size_t i = 0; i < bends; i++) {
+			size_t joint = first[finger] + 1 + i;
+			float angle = ((finger == 0) ? thumbBend[i] : fingerBend[i]) * glm::clamp(curls[finger], 0.f, 1.f);
+			// In the space of a joint -z points to the fingertip and +y out of the back of the hand:
+			// turn around x so that the fingertip moves towards the palm, for this joint and all after it
+			glm::mat4x4 bend = glm::rotate(glm::mat4x4(1.f), glm::radians(-angle), Vec3f(1.f, 0.f, 0.f));
+			glm::mat4x4 delta = posed[joint] * bend * glm::inverse(posed[joint]);
+			for(size_t k = joint; k <= tip; k++) {
+				posed[k] = delta * posed[k];
+			}
+		}
+	}
+	
+	// Hang the posed model on the wrist
+	glm::mat4x4 modelToWorld = joints[wrist] * m_inverseBind[wrist];
+	for(size_t i = 0; i < JointCount; i++) {
+		if(i != wrist) {
+			joints[i] = modelToWorld * posed[i];
+		}
 	}
 	
 }

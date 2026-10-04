@@ -63,6 +63,18 @@ public:
 	 */
 	void skin(const glm::mat4x4 * joints, std::vector<Vec3f> & positions, std::vector<Vec3f> & normals) const;
 
+	static constexpr size_t FingerCount = 5;
+	
+	/*!
+	 * Pose the fingers without finger tracking: curled around something held in the hand.
+	 *
+	 * \param curls  How far the thumb, index, middle, ring and little finger are curled,
+	 *               from 0 (straight) to 1 (fist).
+	 * \param joints Transform to the world for each of the JointCount joints. Only the wrist
+	 *               is used, all others are replaced.
+	 */
+	void curlFingers(const float * curls, glm::mat4x4 * joints) const;
+
 private:
 	
 	std::vector<Vec3f> m_positions;
@@ -71,6 +83,7 @@ private:
 	std::vector<std::array<float, MaxInfluences>> m_weights;
 	std::vector<u16> m_indices;
 	std::array<glm::mat4x4, JointCount> m_inverseBind;
+	std::array<glm::mat4x4, JointCount> m_bind; //!< Joints in the space of the model
 	
 };
 

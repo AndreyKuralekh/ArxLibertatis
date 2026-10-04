@@ -60,6 +60,7 @@ struct ActionState {
 	PFN_xrDestroyHandTrackerEXT destroyHandTracker = nullptr;
 	PFN_xrLocateHandJointsEXT locateHandJoints = nullptr;
 	std::array<XrHandTrackerEXT, HandCount> handTrackers = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+	bool handDataSources = false; //!< XR_EXT_hand_tracking_data_source is enabled
 	
 	Controls controls;
 	
@@ -188,6 +189,7 @@ void createHandTrackers(XrInstance instance, XrSession session, bool controllerH
 	for(Hand hand : { LeftHand, RightHand }) {
 		XrHandTrackerCreateInfoEXT info = { XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT };
 		info.next = controllerHands ? &sourceInfo : nullptr;
+		a.handDataSources = controllerHands;
 		info.hand = (hand == LeftHand) ? XR_HAND_LEFT_EXT : XR_HAND_RIGHT_EXT;
 		info.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
 		if(!xrInputCheck(a.createHandTracker(session, &info, &a.handTrackers[hand]), "xrCreateHandTrackerEXT")) {
@@ -370,8 +372,14 @@ void sync(XrSession session, XrSpace space, XrTime time) {
 			XrHandJointLocationsEXT locations = { XR_TYPE_HAND_JOINT_LOCATIONS_EXT };
 			locations.jointCount = uint32_t(state.joints.size());
 			locations.jointLocations = state.joints.data();
+			XrHandTrackingDataSourceStateEXT source = { XR_TYPE_HAND_TRACKING_DATA_SOURCE_STATE_EXT };
+			if(a.handDataSources) {
+				locations.next = &source;
+			}
 			if(XR_SUCCEEDED(a.locateHandJoints(a.handTrackers[hand], &locateInfo, &locations))) {
 				state.jointsValid = locations.isActive != XR_FALSE;
+				state.jointsFromController = a.handDataSources && source.isActive != XR_FALSE
+				                             && source.dataSource == XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT;
 			}
 		}
 		

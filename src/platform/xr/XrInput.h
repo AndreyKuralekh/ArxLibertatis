@@ -45,6 +45,8 @@ struct HandState {
 	
 	//! Finger joints from hand tracking (XR_EXT_hand_tracking) in the local space, if available
 	bool jointsValid = false;
+	//! The joints are estimated from the held controller, not tracked: no real finger poses
+	bool jointsFromController = false;
 	std::array<XrHandJointLocationEXT, XR_HAND_JOINT_COUNT_EXT> joints;
 	
 };

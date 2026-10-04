@@ -151,6 +151,12 @@ bool getHandJoints(int hand, Vec3f * positions, float * radii);
 bool getHandJointTransforms(int hand, glm::mat4x4 * transforms);
 
 /*!
+ * Whether the finger joints are only estimated from a held controller: the wrist is where the
+ * hand is, but the fingers do not follow the real ones.
+ */
+bool areHandJointsFromController(int hand);
+
+/*!
  * Position of a point attached to the holding pose of a hand in the tracking space, in meters.
  *
  * Unlike world positions this does not change when the player moves or turns with the thumbsticks,

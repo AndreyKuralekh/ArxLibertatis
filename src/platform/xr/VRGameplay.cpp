@@ -1087,10 +1087,12 @@ void prepareHands() {
 		}
 		
 		static int s_loggedSource[2] = { -1, -1 };
-		if(s_loggedSource[hand] != int(tracked)) {
-			s_loggedSource[hand] = int(tracked);
-			LogInfo << (hand == xr::RightHand ? "Right" : "Left") << " VR hand: "
-			        << (tracked ? "tracked finger joints" : "synthetic fingers from trigger and grip");
+		int source = !tracked ? 0 : (xr::areHandJointsFromController(hand) ? 2 : 1);
+		if(s_loggedSource[hand] != source) {
+			s_loggedSource[hand] = source;
+			const char * names[] = { "synthetic fingers from trigger and grip", "tracked finger joints",
+			                         "wrist from the controller, fingers from trigger and grip" };
+			LogInfo << (hand == xr::RightHand ? "Right" : "Left") << " VR hand: " << names[source];
 		}
 		
 		ShaderLight lights[llightsSize];
@@ -1102,6 +1104,18 @@ void prepareHands() {
 			std::array<glm::mat4x4, xr::HandJointCount> joints;
 			const HandModel * model = getHandModel(hand);
 			if(model && xr::getHandJointTransforms(hand, joints.data())) {
+				if(xr::areHandJointsFromController(hand)) {
+					// The runtime only knows where the controller is and reports a flat hand:
+					// hold the controller instead, with the fingers following the trigger and the grip.
+					// The index finger stays straight while it draws runes, to match its tip there.
+					float trigger = xr::getHandTrigger(hand);
+					float squeeze = xr::getHandSqueeze(hand);
+					bool drawing = (player.doingmagic == 2) && hand == xr::getPrimaryHand();
+					float index = drawing ? 0.f : 0.35f + 0.55f * trigger;
+					float others = 0.6f + 0.4f * squeeze;
+					const float curls[HandModel::FingerCount] = { 0.5f, index, others, others, others };
+					model->curlFingers(curls, joints.data());
+				}
 				addHandModel(*model, joints.data(), lights, lightsCount, colorMod);
 				continue;
 			}

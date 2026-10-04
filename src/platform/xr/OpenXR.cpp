@@ -1015,6 +1015,14 @@ bool getHandJointTransforms(int hand, glm::mat4x4 * transforms) {
 	return true;
 }
 
+bool areHandJointsFromController(int hand) {
+	if(hand < 0 || hand >= input::HandCount) {
+		return false;
+	}
+	const input::HandState & state = input::getControls().hands[size_t(hand)];
+	return state.jointsValid && state.jointsFromController;
+}
+
 void setPointerEnabled(bool enabled) {
 	state::pointerEnabled = enabled;
 }
