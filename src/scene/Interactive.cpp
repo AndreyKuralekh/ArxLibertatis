@@ -251,6 +251,15 @@ void ARX_INTERACTIVE_Show_Hide_1st(Entity * io, bool hide1st) {
 	
 	HERO_SHOW_1ST = long(hide1st);
 	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		// In VR the body stays visible, only the head and the arms are hidden
+		vr::setPlayerFirstPersonHidden(*io, hide1st);
+		ARX_INTERACTIVE_HideGore(entities.player(), false);
+		return;
+	}
+	#endif
+	
 	if(VertexSelectionId selection = EERIE_OBJECT_GetSelection(io->obj, "1st")) {
 		for(EERIE_FACE & face : io->obj->facelist) {
 			for(VertexId vertex : face.vid) {
@@ -265,12 +274,6 @@ void ARX_INTERACTIVE_Show_Hide_1st(Entity * io, bool hide1st) {
 			}
 		}
 	}
-	
-	#if ARX_HAVE_OPENXR
-	if(xr::isActive()) {
-		vr::setPlayerArmsHidden(*io, hide1st);
-	}
-	#endif
 	
 	ARX_INTERACTIVE_HideGore(entities.player(), false);
 	

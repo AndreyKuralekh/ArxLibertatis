@@ -1224,7 +1224,7 @@ void updateTorch() {
 	
 }
 
-void setPlayerArmsHidden(Entity & playerEntity, bool hidden) {
+void setPlayerFirstPersonHidden(Entity & playerEntity, bool hidden) {
 	
 	EERIE_3DOBJ * obj = playerEntity.obj;
 	if(!obj || !obj->m_skeleton) {
@@ -1232,37 +1232,45 @@ void setPlayerArmsHidden(Entity & playerEntity, bool hidden) {
 	}
 	const Skeleton & rig = *obj->m_skeleton;
 	
-	// The arms are the shoulder bones and everything attached below them
-	std::vector<bool> arm(obj->vertexlist.size(), false);
-	size_t bones = 0;
+	// The head and the arms are the bones with these names and everything attached below them
+	enum Part { Body, Head, Arm };
+	std::vector<Part> parts(obj->vertexlist.size(), Body);
 	for(VertexGroupId group : obj->grouplist.handles()) {
-		bool isArm = false;
+		Part part = Body;
 		size_t depth = 0;
 		for(VertexGroupId bone = group; bone && depth < obj->grouplist.size(); bone = rig.bones[bone].father, depth++) {
 			const std::string & name = obj->grouplist[bone].name;
+			if(name == "head") {
+				part = Head;
+				break;
+			}
 			if(name == "left_shoulder" || name == "right_shoulder") {
-				isArm = true;
+				part = Arm;
 				break;
 			}
 		}
-		if(!isArm) {
+		if(part == Body) {
 			continue;
 		}
-		bones++;
 		for(VertexId vertex : obj->m_boneVertices[group]) {
-			if(size_t(vertex) < arm.size()) {
-				arm[size_t(vertex)] = true;
+			if(size_t(vertex) < parts.size()) {
+				parts[size_t(vertex)] = part;
 			}
 		}
 	}
 	
+	// Nothing of the head may remain in front of the eyes, so hide every face that touches it.
+	// For the arms only hide faces that are entirely theirs to keep the shoulders of the torso closed.
 	size_t faces = 0;
 	for(EERIE_FACE & face : obj->facelist) {
-		bool inArm = true;
+		bool anyHead = false;
+		bool allArm = true;
 		for(VertexId vertex : face.vid) {
-			inArm = inArm && size_t(vertex) < arm.size() && arm[size_t(vertex)];
+			Part part = size_t(vertex) < parts.size() ? parts[size_t(vertex)] : Body;
+			anyHead = anyHead || part == Head;
+			allArm = allArm && part == Arm;
 		}
-		if(!inArm) {
+		if(!anyHead && !allArm) {
 			continue;
 		}
 		faces++;
@@ -1274,15 +1282,9 @@ void setPlayerArmsHidden(Entity & playerEntity, bool hidden) {
 	}
 	
 	static bool s_logged = false;
-	if(!s_logged) {
+	if(!s_logged && hidden) {
 		s_logged = true;
-		std::ostringstream groups;
-		for(VertexGroupId group : obj->grouplist.handles()) {
-			VertexGroupId father = rig.bones[group].father;
-			groups << ' ' << obj->grouplist[group].name << '<' << (father ? obj->grouplist[father].name : "-");
-		}
-		LogInfo << "VR player model: " << bones << " arm bones, " << faces << " of " << obj->facelist.size()
-		        << " faces " << (hidden ? "hidden" : "shown") << "; bones (name<parent):" << groups.str();
+		LogInfo << "VR player model: head and arms hidden, " << faces << " of " << obj->facelist.size() << " faces";
 	}
 	
 }

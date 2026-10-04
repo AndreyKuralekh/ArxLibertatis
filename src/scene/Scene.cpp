@@ -1615,7 +1615,7 @@ void ARX_SCENE_Render(bool stereoPass) {
 	
 	// *Now* draw the player
 	// In VR the player has hands of their own, the arms of the model are hidden
-	// (see vr::setPlayerArmsHidden()) and the body is not drawn over the world
+	// (see vr::setPlayerFirstPersonHidden()) and the body is not drawn over the world
 	if(entities.player()->animlayer[0].cur_anim) {
 		float invisibility = std::min(0.9f, entities.player()->invisibility);
 		AnimatedEntityRender(entities.player(), invisibility);

@@ -1281,7 +1281,7 @@ void ARX_PLAYER_Manage_Visual() {
 		io->angle = Anglef(0.f, 180.f - player.angle.getYaw(), 0.f);
 		#if ARX_HAVE_OPENXR
 		if(xr::isActive()) {
-			// The player angle includes turning the head, the body stays where it is
+			// The player angle includes turning the head, the body follows it with a delay
 			io->angle.setYaw(180.f - xr::getBodyYaw());
 		}
 		#endif

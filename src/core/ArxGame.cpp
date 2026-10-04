@@ -1530,6 +1530,13 @@ void ArxGame::updateActiveCamera() {
 		Camera base = *cam;
 		if(playerView) {
 			base.m_pos = g_playerCameraStablePos;
+			// The eyes of the model are in front of its neck. The model turns after the view with
+			// a delay (xr::getBodyYaw()), but the view must not swing around when it catches up:
+			// keep the eyes at their distance from the body axis in the direction of the view
+			Vec3f forward = angleToVector(Anglef(0.f, xr::getPlayerYaw(), 0.f));
+			float distance = glm::length(Vec2f(base.m_pos.x - player.pos.x, base.m_pos.z - player.pos.z));
+			base.m_pos.x = player.pos.x + forward.x * distance;
+			base.m_pos.z = player.pos.z + forward.z * distance;
 			// Turns by the mouse and keys this frame are only in desiredangle so far
 			base.angle.setYaw(player.desiredangle.getYaw());
 		}

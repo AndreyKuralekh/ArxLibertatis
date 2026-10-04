@@ -100,12 +100,13 @@ void updateTorch();
 void updatePointer();
 
 /*!
- * Hide or show the arms of the player model: in VR the body is drawn in first person
- * but the hands are separate models at the controllers.
+ * Hide or show the head and the arms of the player model: in VR the body is drawn in first
+ * person but the hands are separate models at the controllers.
  *
- * Called with the head of the model, see ARX_INTERACTIVE_Show_Hide_1st().
+ * Replaces the "1st" selection of the desktop first person view, which also hides the torso,
+ * see ARX_INTERACTIVE_Show_Hide_1st().
  */
-void setPlayerArmsHidden(Entity & player, bool hidden);
+void setPlayerFirstPersonHidden(Entity & player, bool hidden);
 
 //! Batcher for 2D effects that must go to the UI panel instead of the eye views
 RenderBatcher & getUiBatcher();

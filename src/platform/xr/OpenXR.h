@@ -98,7 +98,11 @@ Camera * applyHeadPose(const Camera & base, bool playerView);
 //! Yaw the player should face: body direction plus head yaw (valid after applyHeadPose() for the player)
 float getPlayerYaw();
 
-//! Direction of the player's body in the game world in degrees: the player yaw without the head turn
+/*!
+ * Direction of the visible body of the player in the game world in degrees. It follows the
+ * view (getPlayerYaw()) with a delay: at once when walking or turning with the thumbstick,
+ * otherwise after the head looked away from it for a second.
+ */
 float getBodyYaw();
 
 //! Number of eye views

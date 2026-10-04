@@ -142,6 +142,11 @@ static bool bodyYawValid = false;
 static float bodyYaw = 0.f;
 static float playerYaw = 0.f; //!< Body + head yaw as last given to the player
 static float pendingTurn = 0.f; //!< Snap turns not yet applied to the body (degrees)
+// Direction of the visible body of the player: follows the view after a delay
+static bool avatarYawValid = false;
+static float avatarYaw = 0.f;
+static float avatarTimer = 0.f; //!< For how long the view has been turned away from the body (seconds)
+static bool avatarTurning = false;
 static bool grabCandidate = false; //!< Something is within reach of the right hand
 static bool grabbing = false; //!< The current right grip press is a grab
 static bool pointerEnabled = true;
@@ -847,7 +852,7 @@ void recenter() {
 }
 
 float getBodyYaw() {
-	return state::bodyYawValid ? state::bodyYaw : state::playerYaw;
+	return state::avatarYawValid ? state::avatarYaw : state::playerYaw;
 }
 
 float getPlayerYaw() {
@@ -876,17 +881,21 @@ Camera * applyHeadPose(const Camera & base, bool playerView) {
 			// The game (mouse, keys, scripts) turned the player since the last frame: turn the body
 			float turned = MAKEANGLE(yaw - state::playerYaw + 180.f) - 180.f;
 			state::bodyYaw = MAKEANGLE(state::bodyYaw + turned);
+			state::avatarYaw = MAKEANGLE(state::avatarYaw + turned);
 		} else {
 			state::bodyYaw = MAKEANGLE(yaw - headYaw);
 			state::bodyYawValid = true;
 		}
 		state::bodyYaw = MAKEANGLE(state::bodyYaw + state::pendingTurn);
+		// Turning with the thumbstick turns the whole body at once
+		state::avatarYaw = MAKEANGLE(state::avatarYaw + state::pendingTurn);
 		state::pendingTurn = 0.f;
 		yaw = state::bodyYaw;
 		state::playerYaw = MAKEANGLE(state::bodyYaw + headYaw);
 	} else {
 		// Scripted camera: its yaw is the body direction, pick up the player's direction afterwards
 		state::bodyYawValid = false;
+		state::avatarYawValid = false;
 	}
 	
 	// Body orientation in the game world
@@ -1409,6 +1418,31 @@ static void updateControls() {
 	// Walking: the direction flags drive the walk animations, the analog vector the speed
 	state::moveStick = applyDeadZone(controls.move, 0.15f);
 	vignette = std::max(vignette, glm::length(state::moveStick));
+	
+	// The visible body turns after the head like a person would: at once when walking,
+	// otherwise only after looking away from where the body faces for a second
+	if(!state::avatarYawValid) {
+		state::avatarYaw = state::playerYaw;
+		state::avatarYawValid = state::bodyYawValid;
+		state::avatarTimer = 0.f;
+		state::avatarTurning = false;
+	}
+	float away = std::remainder(state::playerYaw - state::avatarYaw, 360.f);
+	if(std::abs(away) > 30.f) {
+		state::avatarTimer += seconds;
+	} else if(!state::avatarTurning) {
+		state::avatarTimer = 0.f;
+	}
+	if(state::avatarTimer >= 1.f || (glm::length(state::moveStick) > 0.f && std::abs(away) > 5.f)) {
+		state::avatarTurning = true;
+	}
+	if(state::avatarTurning) {
+		state::avatarYaw = MAKEANGLE(state::avatarYaw + away * std::min(seconds * 5.f, 1.f));
+		if(std::abs(away) < 2.f) {
+			state::avatarTurning = false;
+			state::avatarTimer = 0.f;
+		}
+	}
 	const float threshold = 0.2f;
 	state::previousActions = state::actions;
 	state::actions.fill(false);
