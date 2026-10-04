@@ -86,6 +86,10 @@ struct HandSkeleton {
 
 std::vector<TexturedVertex> g_handVertices;
 
+//! Where the palms were when the hands were last drawn, for what the game attaches to the model's hands
+bool g_palmValid[2] = { false, false };
+Vec3f g_palm[2] = { Vec3f(0.f), Vec3f(0.f) };
+
 /*!
  * A simple hand skeleton for runtimes that do not track the fingers while holding controllers:
  * a flat hand pointing where the controller points, fingers curled by the trigger and grip.
@@ -1085,9 +1089,12 @@ void prepareHands() {
 		
 		HandSkeleton skeleton;
 		bool tracked = xr::getHandJoints(hand, skeleton.positions.data(), skeleton.radii.data());
+		g_palmValid[hand] = false;
 		if(!tracked && !createSyntheticHand(hand, skeleton)) {
 			continue;
 		}
+		g_palmValid[hand] = true;
+		g_palm[hand] = skeleton.positions[JointPalm];
 		
 		static int s_loggedSource[2] = { -1, -1 };
 		int source = !tracked ? 0 : (xr::areHandJointsFromController(hand) ? 2 : 1);
@@ -1252,6 +1259,21 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 				folded++;
 				break;
 			}
+		}
+	}
+	
+	// Spells and effects start at the attach points of the model's hands: put those at the VR hands
+	const std::pair<VertexId, int> hands[] = {
+		{ obj.fastaccess.primary_attach, xr::getPrimaryHand() },
+		{ obj.fastaccess.left_attach, xr::getOffHand() },
+	};
+	for(const auto & [vertex, hand] : hands) {
+		if(!vertex || hand < 0 || hand > 1 || !g_palmValid[hand]) {
+			continue;
+		}
+		if(VertexGroupId group = getGroupForVertex(&obj, vertex)) {
+			rig.bones[group].anim.trans = g_palm[hand];
+			rig.bones[group].anim.scale = Vec3f(0.f);
 		}
 	}
 	
