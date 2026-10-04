@@ -27,6 +27,7 @@
 #include "math/Types.h"
 
 class Entity;
+struct EERIE_3DOBJ;
 class RenderBatcher;
 
 /*!
@@ -107,6 +108,13 @@ void updatePointer();
  * see ARX_INTERACTIVE_Show_Hide_1st().
  */
 void setPlayerFirstPersonHidden(Entity & player, bool hidden);
+
+/*!
+ * Fold the head and the arms of the posed player model away if they are hidden.
+ *
+ * Call after the skeleton of the player was animated and before its vertices are transformed.
+ */
+void foldPlayerFirstPerson(EERIE_3DOBJ & obj);
 
 //! Batcher for 2D effects that must go to the UI panel instead of the eye views
 RenderBatcher & getUiBatcher();

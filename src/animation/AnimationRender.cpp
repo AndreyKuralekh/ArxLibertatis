@@ -46,6 +46,7 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "Configure.h"
 #if ARX_HAVE_OPENXR
 #include "platform/xr/OpenXR.h"
+#include "platform/xr/VRGameplay.h"
 #endif
 
 #include <stddef.h>
@@ -1477,6 +1478,13 @@ void EERIEDrawAnimQuatUpdate(EERIE_3DOBJ * eobj,
 	
 	arx_assert(eobj->m_skeleton);
 	animateSkeleton(eobj, animlayer, angle, pos, scale, ftr, io, *eobj->m_skeleton, io ? &io->animBlend : nullptr);
+	
+	#if ARX_HAVE_OPENXR
+	if(io && io == entities.player() && xr::isActive()) {
+		// The VR player sees the body but has separate hands and no head in the way
+		vr::foldPlayerFirstPerson(*eobj);
+	}
+	#endif
 	
 	Cedric_TransformVerts(eobj);
 	if(io) {

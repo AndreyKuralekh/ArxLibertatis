@@ -1224,67 +1224,41 @@ void updateTorch() {
 	
 }
 
+//! The head and the arms of the player model are folded away, see setPlayerFirstPersonHidden()
+static bool g_playerPartsHidden = false;
+
 void setPlayerFirstPersonHidden(Entity & playerEntity, bool hidden) {
+	ARX_UNUSED(playerEntity);
+	g_playerPartsHidden = hidden;
+}
+
+void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 	
-	EERIE_3DOBJ * obj = playerEntity.obj;
-	if(!obj || !obj->m_skeleton) {
+	if(!g_playerPartsHidden || !obj.m_skeleton) {
 		return;
 	}
-	const Skeleton & rig = *obj->m_skeleton;
+	Skeleton & rig = *obj.m_skeleton;
 	
-	// The head and the arms are the bones with these names and everything attached below them
-	enum Part { Body, Head, Arm };
-	std::vector<Part> parts(obj->vertexlist.size(), Body);
-	for(VertexGroupId group : obj->grouplist.handles()) {
-		Part part = Body;
+	// Shrink the head into the top of the neck and each arm into its shoulder joint: the faces
+	// between them and the body then close the openings instead of leaving holes to look into
+	size_t folded = 0;
+	for(VertexGroupId group : obj.grouplist.handles()) {
 		size_t depth = 0;
-		for(VertexGroupId bone = group; bone && depth < obj->grouplist.size(); bone = rig.bones[bone].father, depth++) {
-			const std::string & name = obj->grouplist[bone].name;
-			if(name == "head") {
-				part = Head;
+		for(VertexGroupId bone = group; bone && depth < obj.grouplist.size(); bone = rig.bones[bone].father, depth++) {
+			const std::string & name = obj.grouplist[bone].name;
+			if(name == "head" || name == "left_arm" || name == "right_arm") {
+				rig.bones[group].anim.trans = rig.bones[bone].anim.trans;
+				rig.bones[group].anim.scale = Vec3f(0.f);
+				folded++;
 				break;
 			}
-			if(name == "left_shoulder" || name == "right_shoulder") {
-				part = Arm;
-				break;
-			}
-		}
-		if(part == Body) {
-			continue;
-		}
-		for(VertexId vertex : obj->m_boneVertices[group]) {
-			if(size_t(vertex) < parts.size()) {
-				parts[size_t(vertex)] = part;
-			}
-		}
-	}
-	
-	// Nothing of the head may remain in front of the eyes, so hide every face that touches it.
-	// For the arms only hide faces that are entirely theirs to keep the shoulders of the torso closed.
-	size_t faces = 0;
-	for(EERIE_FACE & face : obj->facelist) {
-		bool anyHead = false;
-		bool allArm = true;
-		for(VertexId vertex : face.vid) {
-			Part part = size_t(vertex) < parts.size() ? parts[size_t(vertex)] : Body;
-			anyHead = anyHead || part == Head;
-			allArm = allArm && part == Arm;
-		}
-		if(!anyHead && !allArm) {
-			continue;
-		}
-		faces++;
-		if(hidden) {
-			face.facetype |= POLY_HIDE;
-		} else {
-			face.facetype &= ~POLY_HIDE;
 		}
 	}
 	
 	static bool s_logged = false;
-	if(!s_logged && hidden) {
+	if(!s_logged) {
 		s_logged = true;
-		LogInfo << "VR player model: head and arms hidden, " << faces << " of " << obj->facelist.size() << " faces";
+		LogInfo << "VR player model: head and arms folded away, " << folded << " of " << obj.grouplist.size() << " bones";
 	}
 	
 }
