@@ -148,6 +148,7 @@ static bool avatarYawValid = false;
 static float avatarYaw = 0.f;
 static float avatarTimer = 0.f; //!< For how long the view has been turned away from the body (seconds)
 static bool avatarTurning = false;
+static bool physicalCrouch = false; //!< The head is well below where it was recentered
 static bool roomFollowing = false; //!< The player is walking after the head that moved away in the room
 static bool grabCandidate = false; //!< Something is within reach of the right hand
 static bool grabbing = false; //!< The current right grip press is a grab
@@ -853,6 +854,10 @@ void recenter() {
 	state::recenterRequested = true;
 }
 
+bool isPhysicallyCrouching() {
+	return state::physicalCrouch;
+}
+
 bool getRoomMove(float seconds, Vec3f & move) {
 	
 	// The player moves before the camera of this frame is set up: use the body directions of the last
@@ -1512,6 +1517,19 @@ static void updateControls() {
 	// Switch to the cursor to click HUD icons (e.g. climbing), and back to free look
 	state::actions[CONTROLS_CUST_FREELOOK] = controls.freelook;
 	state::actions[CONTROLS_CUST_CROUCHTOGGLE] = controls.crouch;
+	// Crouching for real crouches in the game, for as long as the head stays down
+	if(state::viewsValid && !state::recenterRequested) {
+		float head = (state::views[0].pose.position.y + state::views[1].pose.position.y) * 0.5f;
+		float drop = state::recenterPosition.y - head;
+		if(drop > 0.25f) {
+			state::physicalCrouch = true;
+		} else if(drop < 0.15f) {
+			state::physicalCrouch = false;
+		}
+	} else {
+		state::physicalCrouch = false;
+	}
+	state::actions[CONTROLS_CUST_CROUCH] = state::physicalCrouch;
 	state::actions[CONTROLS_CUST_INVENTORY] = controls.inventory;
 	state::actions[CONTROLS_CUST_BOOK] = controls.book;
 	state::actions[CONTROLS_CUST_MAGICMODE] = controls.magic;

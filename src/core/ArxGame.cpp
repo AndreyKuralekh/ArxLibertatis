@@ -1537,6 +1537,39 @@ void ArxGame::updateActiveCamera() {
 			float distance = glm::length(Vec2f(base.m_pos.x - player.pos.x, base.m_pos.z - player.pos.z));
 			base.m_pos.x = player.pos.x + forward.x * distance;
 			base.m_pos.z = player.pos.z + forward.z * distance;
+			// Crouching for real already lowers the head: keep the eyes of the standing model as
+			// the base then, instead of also lowering the view to the eyes of the crouched model
+			static float s_standingEyes = 0.f; // Height of the eyes over the feet, negative is up
+			static float s_standingTime = 0.f;
+			static float s_releaseTime = 0.f;
+			static bool s_standingValid = false;
+			static bool s_holdStanding = false;
+			const float frame = toMsf(g_platformTime.lastFrameDuration()) / 1000.f;
+			const float feet = entities.player()->pos.y;
+			const float eyes = base.m_pos.y - feet;
+			const bool crouched = (player.m_currentMovement & PLAYER_CROUCH) != 0;
+			if(xr::isPhysicallyCrouching()) {
+				s_holdStanding = s_standingValid;
+				s_releaseTime = 0.f;
+			} else if(s_holdStanding) {
+				// Hold on while the model gets up, unless it cannot (low ceiling)
+				s_releaseTime += frame;
+				if(crouched || std::abs(eyes - s_standingEyes) < 3.f || s_releaseTime > 1.f) {
+					s_holdStanding = false;
+				}
+			}
+			if(s_holdStanding) {
+				base.m_pos.y = feet + s_standingEyes;
+				s_standingTime = 0.f;
+			} else if(!crouched && player.jumpphase == NotJumping) {
+				s_standingTime += frame;
+				if(s_standingTime > 1.f) {
+					s_standingEyes = eyes;
+					s_standingValid = true;
+				}
+			} else {
+				s_standingTime = 0.f;
+			}
 			// Turns by the mouse and keys this frame are only in desiredangle so far
 			base.angle.setYaw(player.desiredangle.getYaw());
 		}

@@ -99,6 +99,12 @@ Camera * applyHeadPose(const Camera & base, bool playerView);
 float getPlayerYaw();
 
 /*!
+ * Whether the player crouches for real: the head is at least 25 cm lower than when the view
+ * was recentered. This holds the crouch action of the game.
+ */
+bool isPhysicallyCrouching();
+
+/*!
  * Walking around the room: how far the player should walk this frame to get back under the
  * head, in world units on the floor plane.
  *
