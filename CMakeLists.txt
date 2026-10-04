@@ -1204,6 +1204,7 @@ set(PLATFORM_PROFILER_SOURCES src/platform/profiler/Profiler.cpp)
 set(PLATFORM_XR_SOURCES
 	src/platform/xr/OpenXR.cpp
 	src/platform/xr/VRGameplay.cpp
+	src/platform/xr/VRHandModel.cpp
 	src/platform/xr/XrInput.cpp
 )
 

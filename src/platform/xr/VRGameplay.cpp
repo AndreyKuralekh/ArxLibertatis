@@ -52,6 +52,7 @@
 #include "input/Input.h"
 #include "io/log/Logger.h"
 #include "platform/xr/OpenXR.h"
+#include "platform/xr/VRHandModel.h"
 #include "physics/Collisions.h"
 #include "physics/Physics.h"
 #include "scene/Interactive.h"
@@ -196,6 +197,33 @@ void addBone(const Vec3f & a, float radiusA, const Vec3f & b, float radiusB,
 			g_handVertices.emplace_back(Vec3f(p), p.w, color, Vec2f(0.f));
 		}
 		
+	}
+	
+}
+
+//! Add a hand model moved by the tracked finger joints, lit smoothly by the lights around the player
+void addHandModel(const HandModel & model, const glm::mat4x4 * joints,
+                  ShaderLight lights[], size_t lightsCount, const ColorMod & colorMod) {
+	
+	static std::vector<Vec3f> positions;
+	static std::vector<Vec3f> normals;
+	static std::vector<TexturedVertex> vertices;
+	
+	model.skin(joints, positions, normals);
+	
+	vertices.clear();
+	vertices.reserve(positions.size());
+	for(size_t i = 0; i < positions.size(); i++) {
+		// Brown leather glove
+		Color light = Color::fromRGBA(ApplyLight(lights, lightsCount, positions[i], normals[i], colorMod));
+		ColorRGBA color = Color(u8(light.r * 0.70f), u8(light.g * 0.50f), u8(light.b * 0.34f)).toRGBA();
+		Vec4f p = worldToClipSpace(positions[i]);
+		vertices.emplace_back(Vec3f(p), p.w, color, Vec2f(0.f));
+	}
+	
+	g_handVertices.reserve(g_handVertices.size() + model.indices().size());
+	for(u16 index : model.indices()) {
+		g_handVertices.push_back(vertices[index]);
 	}
 	
 }
@@ -1068,6 +1096,16 @@ void prepareHands() {
 		ShaderLight lights[llightsSize];
 		size_t lightsCount = 0;
 		UpdateLlights(lights, lightsCount, skeleton.positions[JointPalm], true);
+		
+		// A real hand model if the runtime tracks the fingers, boxes along the joints otherwise
+		if(tracked) {
+			std::array<glm::mat4x4, xr::HandJointCount> joints;
+			const HandModel * model = getHandModel(hand);
+			if(model && xr::getHandJointTransforms(hand, joints.data())) {
+				addHandModel(*model, joints.data(), lights, lightsCount, colorMod);
+				continue;
+			}
+		}
 		
 		auto bone = [&](size_t a, size_t b, float thickness = 1.f) {
 			addBone(skeleton.positions[a], skeleton.radii[a] * thickness, skeleton.positions[b],
