@@ -467,9 +467,11 @@ void updateBow() {
 		calibrateBow(bow->obj);
 	}
 	
-	Vec3f forward = glm::normalize(orientation * Vec3f(0.f, 0.f, 1.f));
-	Vec3f down = orientation * Vec3f(0.f, 1.f, 0.f);
-	
+	// With the fist upright the controller handle (the hand's z axis) points up and forward at about
+	// 45 degrees: tilt the bow by that much so that its limbs are vertical and it shoots forward
+	Vec3f forward = glm::normalize(orientation * Vec3f(0.f, 1.f, 1.f));
+	Vec3f down = orientation * Vec3f(0.f, 1.f, -1.f);
+
 	Vec3f hand;
 	glm::mat3 handOrientation;
 	bool handValid = xr::getHandPose(xr::getPrimaryHand(), true, hand, handOrientation);
