@@ -1098,7 +1098,7 @@ void prepareHands() {
 		g_palmValid[hand] = true;
 		g_palm[hand] = skeleton.positions[JointPalm];
 		g_wrist[hand] = skeleton.positions[JointWrist];
-		g_handsPlayerPos = player.pos;
+		g_handsPlayerPos = playerEntity->pos;
 		
 		static int s_loggedSource[2] = { -1, -1 };
 		int source = !tracked ? 0 : (xr::areHandJointsFromController(hand) ? 2 : 1);
@@ -1290,8 +1290,9 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 		{ "right_arm", "right_elbow", "right_wrist", "right_hand", xr::RightHand, 1.f },
 	};
 	
-	// The hands were located when they were last drawn, the player may have moved since
-	Vec3f moved = player.pos - g_handsPlayerPos;
+	// The hands were located when they were last drawn, the player may have moved since.
+	// Use the position of the model: its height is smoothed on stairs like that of the view.
+	Vec3f moved = entities.player() ? entities.player()->pos - g_handsPlayerPos : Vec3f(0.f);
 	
 	// Directions of the body for where the elbows go: down, out to the side and back
 	Vec3f right(1.f, 0.f, 0.f);
