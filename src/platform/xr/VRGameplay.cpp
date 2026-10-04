@@ -89,6 +89,8 @@ std::vector<TexturedVertex> g_handVertices;
 //! Where the palms were when the hands were last drawn, for what the game attaches to the model's hands
 bool g_palmValid[2] = { false, false };
 Vec3f g_palm[2] = { Vec3f(0.f), Vec3f(0.f) };
+Vec3f g_wrist[2] = { Vec3f(0.f), Vec3f(0.f) };
+Vec3f g_handsPlayerPos = Vec3f(0.f); //!< Where the player was then: the hands move along with the player
 
 /*!
  * A simple hand skeleton for runtimes that do not track the fingers while holding controllers:
@@ -1095,6 +1097,8 @@ void prepareHands() {
 		}
 		g_palmValid[hand] = true;
 		g_palm[hand] = skeleton.positions[JointPalm];
+		g_wrist[hand] = skeleton.positions[JointWrist];
+		g_handsPlayerPos = player.pos;
 		
 		static int s_loggedSource[2] = { -1, -1 };
 		int source = !tracked ? 0 : (xr::areHandJointsFromController(hand) ? 2 : 1);
@@ -1246,20 +1250,126 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 	}
 	Skeleton & rig = *obj.m_skeleton;
 	
-	// Shrink the head into the top of the neck and each arm into its shoulder joint: the faces
-	// between them and the body then close the openings instead of leaving holes to look into
-	size_t folded = 0;
-	for(VertexGroupId group : obj.grouplist.handles()) {
+	auto descendsFrom = [&](VertexGroupId group, VertexGroupId ancestor) {
 		size_t depth = 0;
 		for(VertexGroupId bone = group; bone && depth < obj.grouplist.size(); bone = rig.bones[bone].father, depth++) {
-			const std::string & name = obj.grouplist[bone].name;
-			if(name == "head" || name == "left_arm" || name == "right_arm") {
-				rig.bones[group].anim.trans = rig.bones[bone].anim.trans;
-				rig.bones[group].anim.scale = Vec3f(0.f);
-				folded++;
-				break;
+			if(bone == ancestor) {
+				return true;
 			}
 		}
+		return false;
+	};
+	
+	// Shrink a bone and everything attached below it into a point: the faces between them and
+	// the rest of the body then close the opening instead of leaving a hole to look into
+	auto foldInto = [&](VertexGroupId ancestor, const Vec3f & point) {
+		for(VertexGroupId group : obj.grouplist.handles()) {
+			if(descendsFrom(group, ancestor)) {
+				rig.bones[group].anim.trans = point;
+				rig.bones[group].anim.scale = Vec3f(0.f);
+			}
+		}
+	};
+	
+	// No head in the way of the view: shrink it into the top of the neck
+	if(VertexGroupId head = EERIE_OBJECT_GetGroup(&obj, "head")) {
+		foldInto(head, rig.bones[head].anim.trans);
+	}
+	
+	// The arms reach for the wrists of the VR hands, which replace the hands of the model
+	struct Arm {
+		const char * upper;
+		const char * fore;
+		const char * wrist;
+		const char * hand;
+		int tracked;
+		float side;
+	};
+	const Arm arms[] = {
+		{ "left_arm", "left_elbow", "left_wrist", "left_hand", xr::LeftHand, -1.f },
+		{ "right_arm", "right_elbow", "right_wrist", "right_hand", xr::RightHand, 1.f },
+	};
+	
+	// The hands were located when they were last drawn, the player may have moved since
+	Vec3f moved = player.pos - g_handsPlayerPos;
+	
+	// Directions of the body for where the elbows go: down, out to the side and back
+	Vec3f right(1.f, 0.f, 0.f);
+	{
+		VertexGroupId leftArm = EERIE_OBJECT_GetGroup(&obj, "left_arm");
+		VertexGroupId rightArm = EERIE_OBJECT_GetGroup(&obj, "right_arm");
+		if(leftArm && rightArm) {
+			Vec3f across = rig.bones[rightArm].anim.trans - rig.bones[leftArm].anim.trans;
+			across.y = 0.f;
+			if(glm::length(across) > 1.f) {
+				right = glm::normalize(across);
+			}
+		}
+	}
+	const Vec3f down(0.f, 1.f, 0.f);
+	const Vec3f back = -glm::cross(right, down);
+	
+	size_t reaching = 0;
+	for(const Arm & arm : arms) {
+		
+		VertexGroupId upper = EERIE_OBJECT_GetGroup(&obj, arm.upper);
+		VertexGroupId fore = EERIE_OBJECT_GetGroup(&obj, arm.fore);
+		VertexGroupId wrist = EERIE_OBJECT_GetGroup(&obj, arm.wrist);
+		VertexGroupId hand = EERIE_OBJECT_GetGroup(&obj, arm.hand);
+		if(!upper) {
+			continue;
+		}
+		
+		Vec3f shoulder = rig.bones[upper].anim.trans;
+		bool solved = false;
+		if(fore && wrist && hand && g_palmValid[arm.tracked]) {
+			
+			// The posed arm gives the lengths of its two segments and what to turn them from
+			Vec3f elbow0 = rig.bones[fore].anim.trans;
+			Vec3f wrist0 = rig.bones[wrist].anim.trans;
+			float upperLength = glm::distance(shoulder, elbow0);
+			float foreLength = glm::distance(elbow0, wrist0);
+			Vec3f toTarget = g_wrist[arm.tracked] + moved - shoulder;
+			float distance = glm::length(toTarget);
+			
+			if(upperLength > 1.f && foreLength > 1.f && distance > 1.f) {
+				
+				// A triangle with the two segments as sides, stretched out if the hand is out of reach.
+				// The elbow is on the side of the line to the hand that is down, outwards and back.
+				Vec3f direction = toTarget / distance;
+				float reach = glm::clamp(distance, std::abs(upperLength - foreLength) + 0.5f, upperLength + foreLength - 0.1f);
+				float along = (upperLength * upperLength - foreLength * foreLength + reach * reach) / (2.f * reach);
+				float aside = std::sqrt(std::max(upperLength * upperLength - along * along, 0.f));
+				Vec3f pole = down + right * (0.5f * arm.side) + back * 0.5f;
+				pole -= direction * glm::dot(pole, direction);
+				if(glm::length(pole) < 1e-3f) {
+					pole = right * arm.side - direction * glm::dot(right * arm.side, direction);
+				}
+				pole = glm::normalize(pole);
+				Vec3f elbow = shoulder + direction * along + pole * aside;
+				Vec3f end = shoulder + direction * reach;
+				
+				// Turn each segment from where the animation has it to where it has to point
+				glm::quat turnUpper = glm::rotation(glm::normalize(elbow0 - shoulder), glm::normalize(elbow - shoulder));
+				glm::quat turnFore = glm::rotation(glm::normalize(wrist0 - elbow0), glm::normalize(end - elbow));
+				rig.bones[upper].anim.quat = turnUpper * rig.bones[upper].anim.quat;
+				rig.bones[fore].anim.trans = elbow;
+				rig.bones[fore].anim.quat = turnFore * rig.bones[fore].anim.quat;
+				rig.bones[wrist].anim.trans = end;
+				rig.bones[wrist].anim.quat = turnFore * rig.bones[wrist].anim.quat;
+				foldInto(hand, end);
+				
+				solved = true;
+				reaching++;
+			}
+			
+		}
+		
+		if(!solved) {
+			// Without a hand to reach for there is no arm: shrink it into the shoulder joint
+			foldInto(upper, shoulder);
+		}
+		
 	}
 	
 	// Spells and effects start at the attach points of the model's hands: put those at the VR hands
@@ -1272,15 +1382,15 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 			continue;
 		}
 		if(VertexGroupId group = getGroupForVertex(&obj, vertex)) {
-			rig.bones[group].anim.trans = g_palm[hand];
+			rig.bones[group].anim.trans = g_palm[hand] + moved;
 			rig.bones[group].anim.scale = Vec3f(0.f);
 		}
 	}
 	
-	static bool s_logged = false;
-	if(!s_logged) {
-		s_logged = true;
-		LogInfo << "VR player model: head and arms folded away, " << folded << " of " << obj.grouplist.size() << " bones";
+	static int s_logged = -1;
+	if(s_logged != int(reaching)) {
+		s_logged = int(reaching);
+		LogInfo << "VR player model: head folded away, " << reaching << " arms reaching for the VR hands";
 	}
 	
 }
