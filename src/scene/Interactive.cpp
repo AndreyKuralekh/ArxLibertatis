@@ -119,6 +119,11 @@ ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
 #include "scene/Light.h"
 #include "scene/Object.h"
 
+#if ARX_HAVE_OPENXR
+#include "platform/xr/OpenXR.h"
+#include "platform/xr/VRGameplay.h"
+#endif
+
 #include "script/ScriptEvent.h"
 
 #include "util/Range.h"
@@ -260,6 +265,12 @@ void ARX_INTERACTIVE_Show_Hide_1st(Entity * io, bool hide1st) {
 			}
 		}
 	}
+	
+	#if ARX_HAVE_OPENXR
+	if(xr::isActive()) {
+		vr::setPlayerArmsHidden(*io, hide1st);
+	}
+	#endif
 	
 	ARX_INTERACTIVE_HideGore(entities.player(), false);
 	

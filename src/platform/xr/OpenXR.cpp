@@ -846,6 +846,10 @@ void recenter() {
 	state::recenterRequested = true;
 }
 
+float getBodyYaw() {
+	return state::bodyYawValid ? state::bodyYaw : state::playerYaw;
+}
+
 float getPlayerYaw() {
 	return state::playerYaw;
 }

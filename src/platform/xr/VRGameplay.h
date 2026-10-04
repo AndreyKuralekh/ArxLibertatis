@@ -26,6 +26,7 @@
 
 #include "math/Types.h"
 
+class Entity;
 class RenderBatcher;
 
 /*!
@@ -97,6 +98,14 @@ void updateTorch();
  * Call once per frame after the camera was updated.
  */
 void updatePointer();
+
+/*!
+ * Hide or show the arms of the player model: in VR the body is drawn in first person
+ * but the hands are separate models at the controllers.
+ *
+ * Called with the head of the model, see ARX_INTERACTIVE_Show_Hide_1st().
+ */
+void setPlayerArmsHidden(Entity & player, bool hidden);
 
 //! Batcher for 2D effects that must go to the UI panel instead of the eye views
 RenderBatcher & getUiBatcher();

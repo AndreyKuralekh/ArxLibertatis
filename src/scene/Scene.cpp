@@ -1614,11 +1614,12 @@ void ARX_SCENE_Render(bool stereoPass) {
 	PopAllTriangleListOpaque();
 	
 	// *Now* draw the player
-	// In VR the player has hands of their own instead of the first person model
-	if(entities.player()->animlayer[0].cur_anim && !(stereoPass && !EXTERNALVIEW)) {
+	// In VR the player has hands of their own, the arms of the model are hidden
+	// (see vr::setPlayerArmsHidden()) and the body is not drawn over the world
+	if(entities.player()->animlayer[0].cur_anim) {
 		float invisibility = std::min(0.9f, entities.player()->invisibility);
 		AnimatedEntityRender(entities.player(), invisibility);
-		if(!EXTERNALVIEW) {
+		if(!EXTERNALVIEW && !stereoPass) {
 			// In first person mode, always render the player over other objects
 			// in order to avoid clipping the player and weapon with walls.
 			PopAllTriangleListOpaque(render3D().depthTest(false), /*clear=*/false);

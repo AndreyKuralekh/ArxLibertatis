@@ -98,6 +98,9 @@ Camera * applyHeadPose(const Camera & base, bool playerView);
 //! Yaw the player should face: body direction plus head yaw (valid after applyHeadPose() for the player)
 float getPlayerYaw();
 
+//! Direction of the player's body in the game world in degrees: the player yaw without the head turn
+float getBodyYaw();
+
 //! Number of eye views
 constexpr size_t EyeCount = 2;
 

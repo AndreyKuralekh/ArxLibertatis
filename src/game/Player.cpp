@@ -1279,6 +1279,12 @@ void ARX_PLAYER_Manage_Visual() {
 	
 	if(player.lifePool.current > 0) {
 		io->angle = Anglef(0.f, 180.f - player.angle.getYaw(), 0.f);
+		#if ARX_HAVE_OPENXR
+		if(xr::isActive()) {
+			// The player angle includes turning the head, the body stays where it is
+			io->angle.setYaw(180.f - xr::getBodyYaw());
+		}
+		#endif
 	}
 	
 	io->gameFlags |= GFLAG_ISINTREATZONE;

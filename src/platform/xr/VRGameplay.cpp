@@ -23,12 +23,15 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <glm/gtx/quaternion.hpp>
 
 #include "animation/AnimationRender.h"
+#include "animation/Skeleton.h"
 #include "core/Config.h"
 #include "core/Core.h"
 #include "core/GameTime.h"
@@ -1217,6 +1220,69 @@ void updateTorch() {
 		Vec3f fire = torch->obj->vertexWorldPositions[torch->obj->fastaccess.fire].v;
 		createFireParticles(fire, 2, 2ms);
 		lightHandleGet(torchLightHandle)->pos = fire;
+	}
+	
+}
+
+void setPlayerArmsHidden(Entity & playerEntity, bool hidden) {
+	
+	EERIE_3DOBJ * obj = playerEntity.obj;
+	if(!obj || !obj->m_skeleton) {
+		return;
+	}
+	const Skeleton & rig = *obj->m_skeleton;
+	
+	// The arms are the shoulder bones and everything attached below them
+	std::vector<bool> arm(obj->vertexlist.size(), false);
+	size_t bones = 0;
+	for(VertexGroupId group : obj->grouplist.handles()) {
+		bool isArm = false;
+		size_t depth = 0;
+		for(VertexGroupId bone = group; bone && depth < obj->grouplist.size(); bone = rig.bones[bone].father, depth++) {
+			const std::string & name = obj->grouplist[bone].name;
+			if(name == "left_shoulder" || name == "right_shoulder") {
+				isArm = true;
+				break;
+			}
+		}
+		if(!isArm) {
+			continue;
+		}
+		bones++;
+		for(VertexId vertex : obj->m_boneVertices[group]) {
+			if(size_t(vertex) < arm.size()) {
+				arm[size_t(vertex)] = true;
+			}
+		}
+	}
+	
+	size_t faces = 0;
+	for(EERIE_FACE & face : obj->facelist) {
+		bool inArm = true;
+		for(VertexId vertex : face.vid) {
+			inArm = inArm && size_t(vertex) < arm.size() && arm[size_t(vertex)];
+		}
+		if(!inArm) {
+			continue;
+		}
+		faces++;
+		if(hidden) {
+			face.facetype |= POLY_HIDE;
+		} else {
+			face.facetype &= ~POLY_HIDE;
+		}
+	}
+	
+	static bool s_logged = false;
+	if(!s_logged) {
+		s_logged = true;
+		std::ostringstream groups;
+		for(VertexGroupId group : obj->grouplist.handles()) {
+			VertexGroupId father = rig.bones[group].father;
+			groups << ' ' << obj->grouplist[group].name << '<' << (father ? obj->grouplist[father].name : "-");
+		}
+		LogInfo << "VR player model: " << bones << " arm bones, " << faces << " of " << obj->facelist.size()
+		        << " faces " << (hidden ? "hidden" : "shown") << "; bones (name<parent):" << groups.str();
 	}
 	
 }
