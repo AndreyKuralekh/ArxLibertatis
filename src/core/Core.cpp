@@ -504,6 +504,130 @@ static void strikeSpeak(Entity * io) {
 	ARX_SPEECH_AddSpeech(*io, speech, ANIM_TALK_NEUTRAL, ARX_SPEECH_FLAG_NOTEXT);
 }
 
+//! The vertex where the arrow model is held
+VertexId getArrowAttachVertex() {
+	
+	VertexId attach = getNamedVertex(arrowobj.get(), "attach");
+	if(!attach) {
+		attach = arrowobj->origin;
+	}
+	
+	return attach;
+}
+
+//! The tip of the arrow model: the hit point farthest from where it is held
+VertexId getArrowHitVertex(VertexId attach) {
+	
+	VertexId hit;
+	{
+		float maxdist = 0.f;
+		for(const EERIE_ACTIONLIST & action : arrowobj->actionlist) {
+			if(!boost::starts_with(action.name, "hit_")) {
+				continue;
+			}
+			float dist = arx::distance2(arrowobj->vertexlist[attach].v, arrowobj->vertexlist[action.idx].v);
+			if(dist > maxdist) {
+				hit = action.idx;
+				maxdist = dist;
+			}
+		}
+	}
+	if(!hit) {
+		hit = attach;
+		float maxdist = 0.f;
+		for(VertexId vertex : arrowobj->vertexlist.handles()) {
+			float dist = arx::distance2(arrowobj->vertexlist[attach].v, arrowobj->vertexlist[vertex].v);
+			if(vertex != VertexId(0) && dist > maxdist) {
+				hit = vertex;
+				maxdist = dist;
+			}
+		}
+	}
+	
+	return hit;
+}
+
+//! Use up one of the player's arrows, \return how poisonous it is
+static float takeArrowFromQuiver() {
+	
+	Entity * quiver = getInventoryItemWithLowestDurability("arrows", 1.f);
+	float poisonous = 0.f;
+	
+	if(quiver) {
+		poisonous = quiver->poisonous;
+		if(quiver->poisonous_count > 0) {
+			quiver->poisonous_count--;
+			
+			if(quiver->poisonous_count <= 0)
+				quiver->poisonous = 0;
+		}
+		
+		ARX_DAMAGES_DurabilityLoss(quiver, 1.f);
+		
+		// TODO is this needed ?, quivers seem to self destruct via script, but maybe not all
+		if(ValidIOAddress(quiver) && quiver->durability <= 0.f) {
+			ARX_INTERACTIVE_DestroyIOdelayed(quiver);
+		}
+	}
+	
+	if(cur_mx == CHEAT_ENABLED && poisonous < 3.f)
+		poisonous = 3.f;
+	
+	return poisonous;
+}
+
+//! Shoot an arrow for the player, faster, flatter and stronger the more the bow was drawn (aimratio)
+static void throwPlayerArrow(const Vec3f & pos, const Vec3f & dir, float aimratio, VertexId attach,
+                             const glm::quat & quat, float poisonous) {
+	
+	float velocity = std::max(aimratio + 0.3f, 0.9f);
+	
+	Vec3f vect = dir * velocity;
+	
+	// Apply downwards gravity if not fully charged
+	float gravity = 0.0002f * glm::clamp(1.f - aimratio, 0.f, 1.f);
+	
+	float wd = getEquipmentBaseModifier(IO_EQUIPITEM_ELEMENT_Damages);
+	// TODO Why ignore relative modifiers? Why not just use player.Full_damages?
+	
+	float damages = wd * (1.f + (player.m_skillFull.projectile + player.m_attributeFull.dexterity) * 0.02f);
+	
+	ARX_THROWN_OBJECT_Throw(EntityHandle_Player, pos, vect, gravity, arrowobj.get(), attach, quat,
+	                        damages, poisonous);
+	
+	if(cur_mx == CHEAT_ENABLED) {
+		for(int i = -2; i <= 2; i++) {
+			if(i != 0) {
+				Vec3f vect2 = VRotateY(vect, 4.f * float(i));
+				ARX_THROWN_OBJECT_Throw(EntityHandle_Player, pos, vect2, gravity, arrowobj.get(), attach, quat,
+				                        damages, poisonous);
+			}
+		}
+	}
+	
+}
+
+void launchPlayerArrow(const Vec3f & pos, const Vec3f & dir, float aimratio) {
+	
+	SendIOScriptEvent(nullptr, entities.player(), SM_STRIKE, "bow");
+	StrikeAimtime();
+	player.m_strikeAimRatio = aimratio;
+	float poisonous = takeArrowFromQuiver();
+	
+	if(!arrowobj || arrowobj->vertexlist.size() < 2) {
+		return;
+	}
+	
+	// Orient the arrow so that its tip points forward
+	VertexId attach = getArrowAttachVertex();
+	VertexId hit = getArrowHitVertex(attach);
+	Vec3f orientation = arrowobj->vertexlist[hit].v - arrowobj->vertexlist[attach].v;
+	glm::quat quat = glm::inverse(getProjectileQuatFromVector(orientation));
+	
+	throwPlayerArrow(pos, dir, aimratio, attach, quat, poisonous);
+	
+}
+
 void ManageCombatModeAnimations() {
 	
 	arx_assert(entities.player());
@@ -527,8 +651,9 @@ void ManageCombatModeAnimations() {
 	}
 	
 	#if ARX_HAVE_OPENXR
-	if(xr::isActive() && weapontype != WEAPON_BOW) {
-		// In VR melee strikes come from swinging the controllers, see vr::updateCombat()
+	if(xr::isActive()) {
+		// In VR strikes come from swinging the controllers and from drawing the bow by hand,
+		// see vr::updateCombat()
 		return;
 	}
 	#endif
@@ -788,36 +913,8 @@ void ManageCombatModeAnimations() {
 				player.m_aimTime = PlatformDuration::ofRaw(1);
 			} else if(layer1.cur_anim == alist[ANIM_MISSILE_STRIKE_CYCLE]) {
 				
-				VertexId attach = getNamedVertex(arrowobj.get(), "attach");
-				if(!attach) {
-					attach = arrowobj->origin;
-				}
-				
-				VertexId hit;
-				{
-					float maxdist = 0.f;
-					for(const EERIE_ACTIONLIST & action : arrowobj->actionlist) {
-						if(!boost::starts_with(action.name, "hit_")) {
-							continue;
-						}
-						float dist = arx::distance2(arrowobj->vertexlist[attach].v, arrowobj->vertexlist[action.idx].v);
-						if(dist > maxdist) {
-							hit = action.idx;
-							maxdist = dist;
-						}
-					}
-				}
-				if(!hit) {
-					hit = attach;
-					float maxdist = 0.f;
-					for(VertexId vertex : arrowobj->vertexlist.handles()) {
-						float dist = arx::distance2(arrowobj->vertexlist[attach].v, arrowobj->vertexlist[vertex].v);
-						if(vertex != VertexId(0) && dist > maxdist) {
-							hit = vertex;
-							maxdist = dist;
-						}
-					}
-				}
+				VertexId attach = getArrowAttachVertex();
+				VertexId hit = getArrowHitVertex(attach);
 				
 				// Start arrow at the center of the player and shoot it directly forwards
 				Vec3f pos = player.pos + Vec3f(0.f, 40.f, 0.f); // Start position for the arrow
@@ -873,30 +970,9 @@ void ManageCombatModeAnimations() {
 				SendIOScriptEvent(nullptr, io, SM_STRIKE, "bow");
 				StrikeAimtime();
 				player.m_strikeAimRatio = player.m_bowAimRatio;
-				Entity * quiver = getInventoryItemWithLowestDurability("arrows", 1.f);
-				float poisonous = 0.f;
-				
-				if(quiver) {
-					poisonous = quiver->poisonous;
-					if(quiver->poisonous_count > 0) {
-						quiver->poisonous_count--;
-						
-						if(quiver->poisonous_count <= 0)
-							quiver->poisonous = 0;
-					}
-					
-					ARX_DAMAGES_DurabilityLoss(quiver, 1.f);
-					
-					// TODO is this needed ?, quivers seem to self destruct via script, but maybe not all
-					if(ValidIOAddress(quiver) && quiver->durability <= 0.f) {
-						ARX_INTERACTIVE_DestroyIOdelayed(quiver);
-					}
-				}
+				float poisonous = takeArrowFromQuiver();
 				
 				float aimratio = player.m_strikeAimRatio;
-				
-				if(cur_mx == CHEAT_ENABLED && poisonous < 3.f)
-					poisonous = 3.f;
 				
 				if(!arrowobj || arrowobj->vertexlist.size() < 2) {
 					break;
@@ -917,30 +993,7 @@ void ManageCombatModeAnimations() {
 					quat = glm::inverse(getProjectileQuatFromVector(orientation));
 				}
 				
-				float velocity = std::max(aimratio + 0.3f, 0.9f);
-				
-				Vec3f vect = dir * velocity;
-				
-				// Apply downwards gravity if not fully charged
-				float gravity = 0.0002f * glm::clamp(1.f - aimratio, 0.f, 1.f);
-				
-				float wd = getEquipmentBaseModifier(IO_EQUIPITEM_ELEMENT_Damages);
-				// TODO Why ignore relative modifiers? Why not just use player.Full_damages?
-				
-				float damages = wd * (1.f + (player.m_skillFull.projectile + player.m_attributeFull.dexterity) * 0.02f);
-				
-				ARX_THROWN_OBJECT_Throw(EntityHandle_Player, pos, vect, gravity, arrowobj.get(), attach, quat,
-				                        damages, poisonous);
-				
-				if(cur_mx == CHEAT_ENABLED) {
-					for(int i = -2; i <= 2; i++) {
-						if(i != 0) {
-							Vec3f vect2 = VRotateY(vect, 4.f * float(i));
-							ARX_THROWN_OBJECT_Throw(EntityHandle_Player, pos, vect2, gravity, arrowobj.get(), attach, quat,
-							                        damages, poisonous);
-						}
-					}
-				}
+				throwPlayerArrow(pos, dir, aimratio, attach, quat, poisonous);
 				
 				player.m_aimTime = 0;
 			} else if(layer1.cur_anim == alist[ANIM_MISSILE_STRIKE]) {

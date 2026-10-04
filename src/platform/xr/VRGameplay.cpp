@@ -331,6 +331,217 @@ void calibrateTorch(EERIE_3DOBJ * obj) {
 }
 
 /*
+ * Bow held in the left hand and drawn with the right
+ */
+
+struct BowGrip {
+	
+	EERIE_3DOBJ * obj = nullptr;
+	glm::mat3 calibration = glm::mat3(1.f); //!< Model to hand: limbs along the hand's y axis, shooting along z
+	Vec3f attach = Vec3f(0.f); //!< Where the hand holds the model, in model space
+	float brace = 0.f; //!< Distance from the grip back to the string, in model units
+	
+	bool valid = false; //!< The bow is in the hand this frame
+	Entity * bow = nullptr;
+	TransformInfo transform;
+	
+	bool triggerHeld = false;
+	bool nocked = false; //!< An arrow is on the string, held by the right hand
+	float draw = 0.f; //!< How far the bow is drawn, 0 to 1
+	TransformInfo arrow;
+	
+};
+
+BowGrip g_bowGrip;
+
+const float NockReach = 30.f; //!< Maximum distance from the right hand to the string to take it
+const float FullDraw = 0.45f; //!< Pull on the string for a full strength shot, in meters
+const float MinDraw = 0.1f; //!< Releasing the string below this draw ratio puts the arrow back
+
+//! Direction in which a set of points spreads the most, by power iteration on their covariance
+Vec3f principalAxis(const glm::dmat3 & covariance) {
+	glm::dvec3 axis(0.577, 0.577, 0.577);
+	for(int i = 0; i < 64; i++) {
+		glm::dvec3 next = covariance * axis;
+		double length = glm::length(next);
+		if(length < 1e-12) {
+			break;
+		}
+		axis = next / length;
+	}
+	return Vec3f(axis);
+}
+
+/*!
+ * Find how to hold a bow model: the limbs are its longest extent, and the hand holds it
+ * at the front, the side away from the string.
+ */
+void calibrateBow(EERIE_3DOBJ * obj) {
+	
+	g_bowGrip.obj = obj;
+	g_bowGrip.calibration = glm::mat3(1.f);
+	g_bowGrip.attach = obj->vertexlist[obj->origin].v;
+	g_bowGrip.brace = 0.f;
+	
+	size_t count = 0;
+	glm::dvec3 sum(0.0);
+	for(VertexId vertex : obj->vertexlist.handles()) {
+		sum += glm::dvec3(obj->vertexlist[vertex].v);
+		count++;
+	}
+	if(count < 3) {
+		return;
+	}
+	Vec3f mean = Vec3f(sum / double(count));
+	
+	glm::dmat3 covariance(0.0);
+	for(VertexId vertex : obj->vertexlist.handles()) {
+		glm::dvec3 d = glm::dvec3(obj->vertexlist[vertex].v - mean);
+		covariance += glm::outerProduct(d, d);
+	}
+	Vec3f limbs = principalAxis(covariance);
+	
+	bool hasAttach = false;
+	for(const EERIE_ACTIONLIST & action : obj->actionlist) {
+		if(action.name == "primary_attach") {
+			g_bowGrip.attach = obj->vertexlist[action.idx].v;
+			hasAttach = true;
+		}
+	}
+	
+	// The grip is in front of the middle of the model (the string and the limb tips are behind it)
+	Vec3f front = (g_bowGrip.attach - mean) - limbs * glm::dot(g_bowGrip.attach - mean, limbs);
+	if(!hasAttach || glm::length(front) < 1.f) {
+		// No usable grip point: take the second longest extent, its sign is a guess
+		double variance = glm::dot(glm::dvec3(limbs), covariance * glm::dvec3(limbs));
+		glm::dvec3 l(limbs);
+		front = principalAxis(covariance - glm::outerProduct(l, l) * variance);
+		front -= limbs * glm::dot(front, limbs);
+		hasAttach = false;
+	}
+	if(glm::length(front) < 1e-4f) {
+		return;
+	}
+	front = glm::normalize(front);
+	
+	if(!hasAttach) {
+		float reach = 0.f;
+		for(VertexId vertex : obj->vertexlist.handles()) {
+			reach = std::max(reach, glm::dot(obj->vertexlist[vertex].v - mean, front));
+		}
+		g_bowGrip.attach = mean + front * reach;
+	}
+	
+	for(VertexId vertex : obj->vertexlist.handles()) {
+		g_bowGrip.brace = std::max(g_bowGrip.brace, glm::dot(g_bowGrip.attach - obj->vertexlist[vertex].v, front));
+	}
+	
+	// Hand space: x right, y down, z forward
+	Vec3f side = glm::cross(limbs, front);
+	g_bowGrip.calibration = glm::transpose(glm::mat3(side, limbs, front));
+	
+	LogInfo << "VR bow model: " << count << " vertices, limbs along " << limbs.x << ' ' << limbs.y << ' ' << limbs.z
+	        << ", front " << front.x << ' ' << front.y << ' ' << front.z << ", grip point "
+	        << (hasAttach ? "primary_attach" : "guessed") << ", brace height " << g_bowGrip.brace;
+	
+}
+
+//! Place the drawn bow in the left hand, take the string with the right trigger and shoot on release
+void updateBow() {
+	
+	g_bowGrip.valid = false;
+	g_bowGrip.bow = nullptr;
+	
+	Entity * bow = entities.get(player.equiped[EQUIP_SLOT_WEAPON]);
+	Vec3f grip;
+	glm::mat3 orientation;
+	if(!(player.Interface & INTER_COMBATMODE) || ARX_EQUIPMENT_GetPlayerWeaponType() != WEAPON_BOW
+	   || !bow || !bow->obj || !xr::getHandPose(xr::getOffHand(), true, grip, orientation)) {
+		g_bowGrip.nocked = false;
+		g_bowGrip.triggerHeld = false;
+		g_bowGrip.draw = 0.f;
+		return;
+	}
+	
+	if(g_bowGrip.obj != bow->obj) {
+		calibrateBow(bow->obj);
+	}
+	
+	Vec3f forward = glm::normalize(orientation * Vec3f(0.f, 0.f, 1.f));
+	Vec3f down = orientation * Vec3f(0.f, 1.f, 0.f);
+	
+	Vec3f hand;
+	glm::mat3 handOrientation;
+	bool handValid = xr::getHandPose(xr::getPrimaryHand(), true, hand, handOrientation);
+	bool trigger = handValid && xr::getHandTrigger(xr::getPrimaryHand()) > 0.5f;
+	float brace = g_bowGrip.brace * bow->scale;
+	
+	if(trigger && !g_bowGrip.triggerHeld && !g_bowGrip.nocked && !BLOCK_PLAYER_CONTROLS) {
+		Vec3f string = grip - forward * brace;
+		if(glm::distance(hand, string) < NockReach && getInventoryItemWithLowestDurability("arrows", 1.f)) {
+			g_bowGrip.nocked = true;
+		}
+	}
+	g_bowGrip.triggerHeld = trigger;
+	
+	if(g_bowGrip.nocked && !handValid) {
+		g_bowGrip.nocked = false;
+	}
+	
+	if(g_bowGrip.nocked) {
+		// The arrow, and with it the bow, points from the hand on the string to the hand on the bow
+		float distance = glm::distance(grip, hand);
+		if(distance > 5.f) {
+			forward = (grip - hand) / distance;
+		}
+		g_bowGrip.draw = glm::clamp((distance - brace) / (FullDraw * xr::getWorldScale()), 0.f, 1.f);
+		if(!trigger) {
+			g_bowGrip.nocked = false;
+			if(g_bowGrip.draw >= MinDraw && arrowobj) {
+				launchPlayerArrow(grip, forward, g_bowGrip.draw);
+			}
+		}
+	}
+	if(!g_bowGrip.nocked) {
+		g_bowGrip.draw = 0.f;
+	}
+	
+	down -= forward * glm::dot(down, forward);
+	if(glm::length(down) < 1e-3f) {
+		down = orientation * Vec3f(1.f, 0.f, 0.f);
+		down -= forward * glm::dot(down, forward);
+	}
+	down = glm::normalize(down);
+	glm::mat3 world(glm::cross(down, forward), down, forward);
+	
+	TransformInfo t(grip, glm::quat_cast(world * g_bowGrip.calibration), bow->scale);
+	t.pos = t(bow->obj->vertexlist[bow->obj->origin].v - g_bowGrip.attach);
+	g_bowGrip.transform = t;
+	g_bowGrip.bow = bow;
+	g_bowGrip.valid = true;
+	
+	if(g_bowGrip.nocked && arrowobj && arrowobj->vertexlist.size() >= 2) {
+		// The tail of the arrow is at the hand that holds the string
+		VertexId attach = getArrowAttachVertex();
+		Vec3f base = arrowobj->vertexlist[attach].v;
+		Vec3f axis = arrowobj->vertexlist[getArrowHitVertex(attach)].v - base;
+		if(glm::length(axis) > 1e-3f) {
+			axis = glm::normalize(axis);
+			float tail = 0.f;
+			for(VertexId vertex : arrowobj->vertexlist.handles()) {
+				tail = std::min(tail, glm::dot(arrowobj->vertexlist[vertex].v - base, axis));
+			}
+			TransformInfo a(hand, glm::rotation(axis, forward), 1.f);
+			a.pos = a(arrowobj->vertexlist[arrowobj->origin].v - (base + axis * tail));
+			g_bowGrip.arrow = a;
+		} else {
+			g_bowGrip.nocked = false;
+		}
+	}
+	
+}
+
+/*
  * Swings
  */
 
@@ -804,6 +1015,7 @@ void renderUiBatcher() {
 void updateCombat() {
 	
 	updateWeaponGrip();
+	updateBow();
 	
 	WeaponType type = ARX_EQUIPMENT_GetPlayerWeaponType();
 	if(!(player.Interface & INTER_COMBATMODE) || type == WEAPON_BOW || !entities.player()) {
@@ -882,7 +1094,7 @@ void prepareHands() {
 
 void renderHands() {
 	
-	if(g_handVertices.empty() && !g_weaponGrip.valid && !g_torchGrip.valid) {
+	if(g_handVertices.empty() && !g_weaponGrip.valid && !g_torchGrip.valid && !g_bowGrip.valid) {
 		return;
 	}
 	
@@ -898,6 +1110,16 @@ void renderHands() {
 	if(g_weaponGrip.valid) {
 		float invisibility = std::min(0.9f, entities.player()->invisibility);
 		DrawEERIEInter(g_weaponGrip.weapon->obj, g_weaponGrip.transform, g_weaponGrip.weapon, true, invisibility);
+		PopAllTriangleListOpaque();
+		PopAllTriangleListTransparency();
+	}
+	
+	if(g_bowGrip.valid) {
+		float invisibility = std::min(0.9f, entities.player()->invisibility);
+		DrawEERIEInter(g_bowGrip.bow->obj, g_bowGrip.transform, g_bowGrip.bow, true, invisibility);
+		if(g_bowGrip.nocked && arrowobj) {
+			DrawEERIEInter(arrowobj.get(), g_bowGrip.arrow, nullptr, true, invisibility);
+		}
 		PopAllTriangleListOpaque();
 		PopAllTriangleListTransparency();
 	}

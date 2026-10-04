@@ -69,6 +69,20 @@ extern TextureContainer * GoldCoinsTC[MAX_GOLD_COINS_VISUALS];
 
 extern std::unique_ptr<EERIE_3DOBJ> arrowobj;
 extern std::unique_ptr<EERIE_3DOBJ> cameraobj;
+
+//! The vertex where the arrow model is held
+VertexId getArrowAttachVertex();
+//! The tip of the arrow model: the hit point farthest from where it is held
+VertexId getArrowHitVertex(VertexId attach);
+
+/*!
+ * Shoot one of the player's arrows from any position: takes it from the quiver, tells the
+ * scripts about the strike and throws it with the speed, drop and damage for the draw ratio.
+ *
+ * \param dir      Unit vector of the flight direction
+ * \param aimratio How far the bow was drawn, 0 to 1
+ */
+void launchPlayerArrow(const Vec3f & pos, const Vec3f & dir, float aimratio);
 extern std::unique_ptr<EERIE_3DOBJ> markerobj;
 extern Vec2s DANAEMouse;
 extern Vec3f g_moveto;
