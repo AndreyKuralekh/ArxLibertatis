@@ -21,7 +21,8 @@
 Convert the WebXR "generic-hand" glTF models (tools/vr/generic-hand/*.glb, see LICENSE.generic-hand)
 into the simple binary files that the VR hands are drawn from (data/core/graph/obj3d/vr/*.vrhand).
 
-A glove cuff around the wrist is added to the hand mesh.
+With --cuff a glove cuff around the wrist is added to the hand mesh, for hands that are drawn
+without arms.
 
 File layout, little endian:
   char[4] "AVRH", u32 version (1), u32 vertex count, u32 index count
@@ -33,13 +34,14 @@ File layout, little endian:
   u16      vertex per index, three per triangle
   float[16] inverse bind matrix per joint for all 26 XrHandJointEXT values, column-major
 
-Usage: convert-hand-model.py (from anywhere, paths are relative to this script)
+Usage: convert-hand-model.py [--cuff] (from anywhere, paths are relative to this script)
 """
 
 import json
 import math
 import os
 import struct
+import sys
 
 # WebXR joint names in the order of XrHandJointEXT, which starts with the palm that WebXR does not have
 FINGERS = (
@@ -91,7 +93,7 @@ def rigid_inverse(m):
 	return r
 
 
-def convert(source, target):
+def convert(source, target, cuff):
 
 	data = open(source, 'rb').read()
 	magic, version, _ = struct.unpack_from('<4sII', data, 0)
@@ -156,7 +158,7 @@ def convert(source, target):
 	center = [(min(p[i] for p in ring) + max(p[i] for p in ring)) * 0.5 for i in range(2)]
 	radius = [(max(p[i] for p in ring) - min(p[i] for p in ring)) * 0.5 for i in range(2)]
 	base = len(positions)
-	for row, (offset, scale) in enumerate(CUFF_PROFILE):
+	for row, (offset, scale) in enumerate(CUFF_PROFILE if cuff else ()):
 		previous = CUFF_PROFILE[max(row - 1, 0)]
 		following = CUFF_PROFILE[min(row + 1, len(CUFF_PROFILE) - 1)]
 		slope = (following[1] - previous[1]) * (radius[0] + radius[1]) * 0.5 / (following[0] - previous[0])
@@ -171,7 +173,7 @@ def convert(source, target):
 			uvs.append([segment / CUFF_SEGMENTS, row / (len(CUFF_PROFILE) - 1)])
 			joints.append([WRIST] * 4)
 			weights.append([1.0, 0.0, 0.0, 0.0])
-	for row in range(len(CUFF_PROFILE) - 1):
+	for row in range(len(CUFF_PROFILE) - 1 if cuff else 0):
 		for segment in range(CUFF_SEGMENTS):
 			a = base + row * CUFF_SEGMENTS + segment
 			b = base + row * CUFF_SEGMENTS + (segment + 1) % CUFF_SEGMENTS
@@ -208,4 +210,5 @@ if __name__ == '__main__':
 	here = os.path.dirname(os.path.abspath(__file__))
 	output = os.path.join(here, '..', '..', 'data', 'core', 'graph', 'obj3d', 'vr')
 	for side in ('left', 'right'):
-		convert(os.path.join(here, 'generic-hand', side + '.glb'), os.path.join(output, 'hand_' + side + '.vrhand'))
+		convert(os.path.join(here, 'generic-hand', side + '.glb'), os.path.join(output, 'hand_' + side + '.vrhand'),
+		        '--cuff' in sys.argv[1:])

@@ -1364,8 +1364,9 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 				glm::quat turnUpper = glm::rotation(glm::normalize(elbow0 - shoulder), glm::normalize(elbow - shoulder));
 				glm::quat turnFore = glm::rotation(glm::normalize(wrist0 - elbow0), glm::normalize(end - elbow));
 				
-				// Roll the forearm around its axis so that the thumb side of the model's hand is where
-				// the thumb of the VR hand is: all the way at the wrist, half of it along the forearm
+				// Roll the wrist around the axis of the forearm so that the thumb side of the model's hand
+				// is where the thumb of the VR hand is. Each vertex follows a single bone, so rolling the
+				// whole forearm as well would wring the elbow: leave it as the animation has it.
 				glm::quat rollFore = quat_identity();
 				glm::quat rollWrist = quat_identity();
 				VertexGroupId thumb = EERIE_OBJECT_GetGroup(&obj, arm.thumb);
@@ -1379,8 +1380,7 @@ void foldPlayerFirstPerson(EERIE_3DOBJ & obj) {
 						from = glm::normalize(from);
 						to = glm::normalize(to);
 						float angle = std::atan2(glm::dot(glm::cross(from, to), axis), glm::dot(from, to));
-						rollFore = glm::angleAxis(angle * 0.5f, axis);
-						rollWrist = glm::angleAxis(angle, axis);
+						rollWrist = glm::angleAxis(glm::clamp(angle, glm::radians(-100.f), glm::radians(100.f)), axis);
 					}
 				}
 				
